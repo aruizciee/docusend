@@ -96,11 +96,15 @@ def _download_and_restart(app, asset_url):
             for chunk in resp.iter_content(chunk_size=65536):
                 f.write(chunk)
 
-        # Crear script batch que espera a que este proceso termine,
-        # sustituye el exe y lanza la nueva versión.
+        # Crear script batch que espera a que este proceso (por PID) termine
+        # antes de reemplazar el exe — evita el error de DLL de PyInstaller.
+        pid = os.getpid()
         bat_content = (
             "@echo off\n"
-            "timeout /t 2 /nobreak >nul\n"
+            f":wait\n"
+            f'tasklist /fi "PID eq {pid}" 2>nul | find /i "generador_contratos.exe" >nul\n'
+            f"if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\n"
+            "timeout /t 3 /nobreak >nul\n"
             f'move /y "{new_exe}" "{current_exe}"\n'
             f'start "" "{current_exe}"\n'
             'del "%~f0"\n'
