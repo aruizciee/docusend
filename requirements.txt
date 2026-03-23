@@ -4,3 +4,4 @@ openpyxl
 docxtpl
 pywin32
 pyinstaller
+requests
