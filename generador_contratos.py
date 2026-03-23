@@ -53,6 +53,7 @@ class App(ctk.CTk):
         self.outlook_template_path = ""
         self.output_folder = ""
         self.excel_columns = []
+        self.outlook_accounts = []   # lista de (nombre_display, objeto_account)
         
         # --- UI Layout ---
         self.grid_columnconfigure(0, weight=1)
@@ -168,20 +169,32 @@ class App(ctk.CTk):
         ctk.CTkRadioButton(frame_out_format, text="PDF", variable=self.output_format, value="pdf").pack(side="left", padx=10)
         ctk.CTkRadioButton(frame_out_format, text="Word (.docx)", variable=self.output_format, value="docx").pack(side="left", padx=10)
 
+        # Cuenta de Outlook
+        frame_account = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        frame_account.grid(row=8, column=0, columnspan=3, pady=(10, 0), padx=10, sticky="ew")
+        frame_account.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(frame_account, text="Cuenta de envío:").grid(row=0, column=0, padx=(0, 10), sticky="w")
+        self.combo_account = ctk.CTkComboBox(frame_account, values=["(cargando cuentas…)"], state="readonly")
+        self.combo_account.set("(cargando cuentas…)")
+        self.combo_account.grid(row=0, column=1, sticky="ew")
+        ctk.CTkButton(frame_account, text="↺", width=32,
+                      command=self._load_outlook_accounts).grid(row=0, column=2, padx=(6, 0))
+        self.after(1500, self._load_outlook_accounts)
+
         # Send Mode
         self.send_mode = ctk.StringVar(value="draft")
         frame_send_mode = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_send_mode.grid(row=8, column=0, columnspan=3, pady=(10,0))
+        frame_send_mode.grid(row=9, column=0, columnspan=3, pady=(10,0))
         ctk.CTkRadioButton(frame_send_mode, text="Guardar en Borradores (Draft)", variable=self.send_mode, value="draft").pack(side="left", padx=10)
         ctk.CTkRadioButton(frame_send_mode, text="Enviar Directamente (Send)", variable=self.send_mode, value="send").pack(side="left", padx=10)
 
         # Generate Button
         self.btn_generate = ctk.CTkButton(self.main_frame, text="Generar Contratos y Correos", command=self.start_generation, height=40, font=("System", 14, "bold"))
-        self.btn_generate.grid(row=9, column=0, columnspan=3, pady=20)
-        
+        self.btn_generate.grid(row=10, column=0, columnspan=3, pady=20)
+
         # Barra de progreso
         self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.progress_frame.grid(row=10, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 0))
+        self.progress_frame.grid(row=11, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 0))
         self.progress_frame.grid_columnconfigure(0, weight=1)
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame)
         self.progress_bar.grid(row=0, column=0, sticky="ew", pady=(0, 2))
@@ -191,15 +204,15 @@ class App(ctk.CTk):
 
         # Log Textbox
         self.log_box = ctk.CTkTextbox(self.main_frame, height=150, state="disabled")
-        self.log_box.grid(row=11, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
-        self.main_frame.grid_rowconfigure(11, weight=1)
+        self.log_box.grid(row=12, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+        self.main_frame.grid_rowconfigure(12, weight=1)
 
         # Restaurar configuración guardada
         self._restore_config()
 
         # Barra inferior: versión + botón de actualización manual
         frame_bottom = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_bottom.grid(row=12, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
+        frame_bottom.grid(row=13, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
         frame_bottom.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(frame_bottom, text=f"Versión: {VERSION}", text_color="gray", font=("System", 11)).grid(row=0, column=0, sticky="w")
@@ -211,6 +224,33 @@ class App(ctk.CTk):
             font=("System", 11),
             command=lambda: check_for_updates(self)
         ).grid(row=0, column=1, sticky="e")
+
+    def _load_outlook_accounts(self):
+        """Obtiene las cuentas configuradas en Outlook y rellena el ComboBox."""
+        def fetch():
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+                ol = win32.Dispatch("Outlook.Application")
+                accounts = ol.Session.Accounts
+                result = [(accounts.Item(i).DisplayName, accounts.Item(i).SmtpAddress)
+                          for i in range(1, accounts.Count + 1)]
+                self.outlook_accounts = result
+                names = [f"{name} ({smtp})" for name, smtp in result]
+                self.after(0, lambda: self._set_account_combo(names))
+            except Exception:
+                self.after(0, lambda: self.combo_account.configure(
+                    values=["(no se pudieron cargar las cuentas)"]
+                ))
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _set_account_combo(self, names):
+        if names:
+            self.combo_account.configure(values=names, state="readonly")
+            self.combo_account.set(names[0])
+        else:
+            self.combo_account.configure(values=["(sin cuentas)"])
+            self.combo_account.set("(sin cuentas)")
 
     def _update_columns(self):
         """Lee las cabeceras del Excel y actualiza los ComboBox de campos."""
@@ -419,7 +459,24 @@ class App(ctk.CTk):
                 import pythoncom
                 pythoncom.CoInitialize()
                 outlook = win32.Dispatch("Outlook.Application")
-                
+
+                # Resolver la cuenta seleccionada
+                selected_account_label = self.combo_account.get()
+                send_account = None
+                for name, smtp in self.outlook_accounts:
+                    if selected_account_label.startswith(name):
+                        try:
+                            accounts = outlook.Session.Accounts
+                            for i in range(1, accounts.Count + 1):
+                                if accounts.Item(i).SmtpAddress == smtp:
+                                    send_account = accounts.Item(i)
+                                    break
+                        except Exception:
+                            pass
+                        break
+                if send_account:
+                    self.log(f"Cuenta de envío: {selected_account_label}")
+
                 # Only init Word if PDF is selected to speed up DOCX-only runs
                 word_app = None
                 if self.output_format.get() == "pdf":
@@ -519,6 +576,8 @@ class App(ctk.CTk):
                         mail.Subject = substitute_variables(mail.Subject or "", context)
 
                     mail.To = dest_email
+                    if send_account:
+                        mail.SendUsingAccount = send_account
                     mail.Attachments.Add(os.path.abspath(final_attachment_path))
                     
                     if s_mode == "send":
