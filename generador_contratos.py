@@ -91,16 +91,29 @@ class App(ctk.CTk):
         self.entry_filename_pattern.insert(0, "{{ Apellidos }}, {{ Nombre }}") # Default value
         self.entry_filename_pattern.grid(row=1, column=1, padx=0, pady=5, sticky="ew")
 
+        # Panel de ayuda
+        help_text = (
+            "ℹ️  Usa {{NombreColumna}} para insertar datos del Excel — "
+            "en la plantilla Word, en el patrón de nombre de archivo, "
+            "y en el asunto y cuerpo del correo."
+        )
+        lbl_help = ctk.CTkLabel(
+            self.main_frame, text=help_text,
+            text_color="gray", font=("System", 11),
+            wraplength=620, justify="left"
+        )
+        lbl_help.grid(row=4, column=0, columnspan=3, padx=12, pady=(4, 2), sticky="w")
+
         # Divider
         frame_div = ctk.CTkFrame(self.main_frame, height=2, fg_color="gray50")
-        frame_div.grid(row=4, column=0, columnspan=3, sticky="ew", padx=10, pady=10)
+        frame_div.grid(row=5, column=0, columnspan=3, sticky="ew", padx=10, pady=(4, 10))
         
         # 5. Email Configuration Toggle
         self.email_mode = ctk.StringVar(value="manual")
         
         # Email settings container
         self.email_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.email_frame.grid(row=5, column=0, columnspan=3, sticky="ew")
+        self.email_frame.grid(row=6, column=0, columnspan=3, sticky="ew")
         self.email_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkRadioButton(self.email_frame, text="Escribir Asunto y Cuerpo", variable=self.email_mode, value="manual", command=self.toggle_email_mode).grid(row=0, column=0, padx=10, pady=10)
@@ -127,7 +140,7 @@ class App(ctk.CTk):
         # Output format
         self.output_format = ctk.StringVar(value="pdf")
         frame_out_format = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_out_format.grid(row=6, column=0, columnspan=3, pady=(10,0))
+        frame_out_format.grid(row=7, column=0, columnspan=3, pady=(10,0))
         ctk.CTkLabel(frame_out_format, text="Formato Archivo:").pack(side="left", padx=10)
         ctk.CTkRadioButton(frame_out_format, text="PDF", variable=self.output_format, value="pdf").pack(side="left", padx=10)
         ctk.CTkRadioButton(frame_out_format, text="Word (.docx)", variable=self.output_format, value="docx").pack(side="left", padx=10)
@@ -135,17 +148,17 @@ class App(ctk.CTk):
         # Send Mode
         self.send_mode = ctk.StringVar(value="draft")
         frame_send_mode = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_send_mode.grid(row=7, column=0, columnspan=3, pady=(10,0))
+        frame_send_mode.grid(row=8, column=0, columnspan=3, pady=(10,0))
         ctk.CTkRadioButton(frame_send_mode, text="Guardar en Borradores (Draft)", variable=self.send_mode, value="draft").pack(side="left", padx=10)
         ctk.CTkRadioButton(frame_send_mode, text="Enviar Directamente (Send)", variable=self.send_mode, value="send").pack(side="left", padx=10)
 
         # Generate Button
         self.btn_generate = ctk.CTkButton(self.main_frame, text="Generar Contratos y Correos", command=self.start_generation, height=40, font=("System", 14, "bold"))
-        self.btn_generate.grid(row=8, column=0, columnspan=3, pady=20)
+        self.btn_generate.grid(row=9, column=0, columnspan=3, pady=20)
         
         # Barra de progreso
         self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.progress_frame.grid(row=9, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 0))
+        self.progress_frame.grid(row=10, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 0))
         self.progress_frame.grid_columnconfigure(0, weight=1)
         self.progress_bar = ctk.CTkProgressBar(self.progress_frame)
         self.progress_bar.grid(row=0, column=0, sticky="ew", pady=(0, 2))
@@ -155,15 +168,15 @@ class App(ctk.CTk):
 
         # Log Textbox
         self.log_box = ctk.CTkTextbox(self.main_frame, height=150, state="disabled")
-        self.log_box.grid(row=10, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
-        self.main_frame.grid_rowconfigure(10, weight=1)
+        self.log_box.grid(row=11, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
+        self.main_frame.grid_rowconfigure(11, weight=1)
 
         # Restaurar configuración guardada
         self._restore_config()
 
         # Barra inferior: versión + botón de actualización manual
         frame_bottom = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_bottom.grid(row=11, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
+        frame_bottom.grid(row=12, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
         frame_bottom.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(frame_bottom, text=f"Versión: {VERSION}", text_color="gray", font=("System", 11)).grid(row=0, column=0, sticky="w")
@@ -430,10 +443,10 @@ class App(ctk.CTk):
                         subject_f = self.entry_subject.get()
                         body_f = self.txt_body.get("1.0", "end-1c")
                         
-                        # Simple replacement for subject/body variables if they used bracket notation like {Nombre}
+                        # Sustitución de variables con doble llave {{Nombre}}
                         for k, v in context.items():
-                            subject_f = subject_f.replace("{"+k+"}", str(v))
-                            body_f = body_f.replace("{"+k+"}", str(v))
+                            subject_f = subject_f.replace("{{"+k+"}}", str(v))
+                            body_f = body_f.replace("{{"+k+"}}", str(v))
                             
                         mail.Subject = subject_f
                         body_esc = html.escape(body_f).replace("\n", "<br>")
@@ -445,16 +458,16 @@ class App(ctk.CTk):
                         try: body_orig = mail.HTMLBody 
                         except: body_orig = mail.Body
                         
-                        # Replace variables in .oft body
-                        for k, v in context.items(): 
-                            body_orig = body_orig.replace("{"+k+"}", str(v))
-                        
+                        # Sustitución de variables con doble llave {{Nombre}} en .oft
+                        for k, v in context.items():
+                            body_orig = body_orig.replace("{{"+k+"}}", str(v))
+
                         try: mail.HTMLBody = body_orig
                         except: mail.Body = body_orig
-                        
+
                         sub_orig = mail.Subject or ""
-                        for k, v in context.items(): 
-                            sub_orig = sub_orig.replace("{"+k+"}", str(v))
+                        for k, v in context.items():
+                            sub_orig = sub_orig.replace("{{"+k+"}}", str(v))
                         mail.Subject = sub_orig
 
                     mail.To = dest_email
