@@ -1,9 +1,9 @@
 """
 Auto-updater para GeneradorContratos.
 Comprueba la última release en GitHub y, si hay versión nueva,
-pregunta al usuario si desea actualizar. La descarga y reemplaza
-el .exe usando un script batch auxiliar (necesario en Windows porque
-no se puede sobreescribir un ejecutable mientras está en uso).
+pregunta al usuario si desea actualizar. La descarga e instala en
+%LOCALAPPDATA%\GeneradorContratos\ (carpeta local, fuera de OneDrive)
+para evitar interferencias con la sincronización al cargar DLLs.
 """
 import os
 import sys
@@ -23,6 +23,18 @@ EXE_NAME     = "generador_contratos.exe"
 
 
 # ---------------------------------------------------------------------------
+# Directorio de instalación local (fuera de OneDrive)
+# ---------------------------------------------------------------------------
+
+def _get_install_dir():
+    """Devuelve %LOCALAPPDATA%\GeneradorContratos, creándolo si no existe."""
+    local_appdata = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    d = os.path.join(local_appdata, "GeneradorContratos")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+# ---------------------------------------------------------------------------
 # Punto de entrada público
 # ---------------------------------------------------------------------------
 
@@ -39,8 +51,8 @@ def _check(app):
     try:
         resp = requests.get(GITHUB_API, timeout=10)
         resp.raise_for_status()
-        data     = resp.json()
-        latest   = data.get("tag_name", "")
+        data   = resp.json()
+        latest = data.get("tag_name", "")
         if not latest or _parse_version(latest) <= _parse_version(VERSION):
             return                               # ya tenemos la última versión
 
@@ -87,39 +99,43 @@ def _prompt_update(app, latest, asset_url):
 
 
 def _download_and_restart(app, asset_url):
-    """Descarga el nuevo .exe y lanza un script batch que lo reemplaza."""
+    """
+    Descarga el nuevo .exe en %LOCALAPPDATA%\\GeneradorContratos\\ y lanza
+    un script batch que lo activa. Usar esta carpeta local (no OneDrive)
+    evita que la sincronización en tiempo real bloquee la carga de DLLs.
+    """
     if not getattr(sys, "frozen", False):
-        # Modo desarrollo: no tiene sentido reemplazar nada
         messagebox.showinfo("Dev mode", "Auto-update desactivado en modo desarrollo.")
         return
 
-    current_exe = sys.executable
-    new_exe     = current_exe + ".new"
-    bat_path    = os.path.join(os.path.dirname(current_exe), "_updater.bat")
+    install_dir = _get_install_dir()
+    install_exe = os.path.join(install_dir, EXE_NAME)
+    new_exe     = install_exe + ".new"
+    bat_path    = os.path.join(install_dir, "_updater.bat")
 
     try:
         # Mostrar aviso de descarga en hilo principal
         app.after(0, lambda: _show_downloading(app))
 
-        # Descargar nuevo ejecutable
+        # Descargar nuevo ejecutable en la carpeta local
         resp = requests.get(asset_url, stream=True, timeout=120)
         resp.raise_for_status()
         with open(new_exe, "wb") as f:
             for chunk in resp.iter_content(chunk_size=65536):
                 f.write(chunk)
 
-        # Crear script batch que espera a que este proceso (por PID) termine
-        # antes de reemplazar el exe — evita el error de DLL de PyInstaller.
+        # Script batch: espera a que este proceso termine, sustituye el exe
+        # y lo relanza desde la carpeta local (fuera de OneDrive).
         pid = os.getpid()
         bat_content = (
             f"@echo off\n"
             f":wait\n"
             f'tasklist /fi "PID eq {pid}" 2>nul | find /i "generador_contratos.exe" >nul\n'
             f"if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\n"
-            f"timeout /t 5 /nobreak >nul\n"
-            f'move /y "{new_exe}" "{current_exe}"\n'
             f"timeout /t 2 /nobreak >nul\n"
-            f'start "" "{current_exe}"\n'
+            f'move /y "{new_exe}" "{install_exe}"\n'
+            f"timeout /t 1 /nobreak >nul\n"
+            f'start "" "{install_exe}"\n'
             f'del "%~f0"\n'
         )
         with open(bat_path, "w") as f:
@@ -133,7 +149,6 @@ def _download_and_restart(app, asset_url):
         app.after(0, app.destroy)
 
     except Exception as e:
-        # Limpiar archivos temporales si algo falló
         for path in (new_exe, bat_path):
             try:
                 os.remove(path)

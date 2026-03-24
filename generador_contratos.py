@@ -160,9 +160,10 @@ class App(ctk.CTk):
         self.current_step = step
         for i, f in enumerate(self.step_frames):
             if i == step:
+                f.grid()
                 f.tkraise()
             else:
-                f.lower()
+                f.grid_remove()
         self._update_step_indicator(step)
         self.btn_prev.configure(state="normal" if step > 0 else "disabled")
         if step == len(STEPS) - 1:
@@ -288,7 +289,7 @@ class App(ctk.CTk):
     def _build_step3(self):
         f = ctk.CTkScrollableFrame(self.content)
         self.step_frames.append(f)
-        f.grid_columnconfigure(1, weight=1)
+        # f.grid_columnconfigure(1, weight=1)  # INCORRECTO: La columna 1 es para la scrollbar en CTKScrollableFrame.
 
         ctk.CTkLabel(f, text="Configura el correo electrónico",
                      font=("System", 13, "bold")).grid(
