@@ -31,14 +31,14 @@ jobs:
           $run  = "${{ github.run_number }}"
           $tag  = "v$date-$run"
           echo "TAG=$tag" >> $env:GITHUB_OUTPUT
-          # Inyectar versión en version.py antes de compilar
-          "VERSION = `"$tag`"" | Set-Content version.py
+          # Inyectar versión en version.py con UTF-8 sin BOM para que Python lo lea bien
+          [System.IO.File]::WriteAllText("version.py", "VERSION = `"$tag`"`n", [System.Text.UTF8Encoding]::new($false))
 
       - name: Compilar ejecutable
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --collect-all customtkinter `
-            --add-data "version.py;." `
+            --runtime-tmpdir "." `
             generador_contratos.py
 
       - name: Crear Release y subir .exe
