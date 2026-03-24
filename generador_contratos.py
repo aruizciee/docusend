@@ -396,8 +396,6 @@ class App(ctk.CTk):
         self.log_box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 16))
         f.grid_rowconfigure(3, weight=1)
 
-        # Botón generar (también en el nav, pero lo mantenemos aquí como referencia)
-        self.btn_generate = self.btn_next   # se re-usa el btn_next en el último paso
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Outlook accounts
