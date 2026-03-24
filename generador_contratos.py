@@ -29,7 +29,6 @@ def save_config(data):
         pass
 
 def substitute_variables(text, context):
-    """Reemplaza {{clave}} por su valor en context."""
     for k, v in context.items():
         text = text.replace("{{" + k + "}}", str(v))
     return text
@@ -37,196 +36,373 @@ def substitute_variables(text, context):
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
+STEPS = ["Archivos", "Configuración", "Correo", "Generar"]
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
         self.title("Generador de Contratos y Correos")
-        self.geometry("800x750")
+        self.geometry("700x620")
+        self.resizable(False, False)
 
-        # Comprobar actualizaciones al arrancar (en segundo plano)
         self.after(3000, lambda: check_for_updates(self))
-        
-        # --- Variables ---
-        self.word_template_path = ""
-        self.excel_data_path = ""
+
+        # --- Variables de datos ---
+        self.word_template_path   = ""
+        self.excel_data_path      = ""
         self.outlook_template_path = ""
-        self.output_folder = ""
-        self.excel_columns = []
-        self.outlook_accounts = []   # lista de (nombre_display, objeto_account)
-        
-        # --- UI Layout ---
+        self.output_folder        = ""
+        self.excel_columns        = []
+        self.outlook_accounts     = []
+        self.current_step         = 0
+
+        # --- Layout raíz ---
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        
-        # Main Frame
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
-        self.main_frame.grid_columnconfigure(1, weight=1)
-        
-        # 1. Word Template Select
-        ctk.CTkLabel(self.main_frame, text="1. Plantilla Word (.docx):").grid(row=0, column=0, padx=10, pady=(20, 10), sticky="w")
-        self.lbl_word = ctk.CTkLabel(self.main_frame, text="Ningún archivo seleccionado", text_color="gray")
-        self.lbl_word.grid(row=0, column=1, padx=10, pady=(20, 10), sticky="w")
-        ctk.CTkButton(self.main_frame, text="Seleccionar", command=self.select_word).grid(row=0, column=2, padx=10, pady=(20, 10))
-        
-        # 2. Excel Data Select
-        ctk.CTkLabel(self.main_frame, text="2. Datos Excel (.xlsx):").grid(row=1, column=0, padx=10, pady=10, sticky="w")
-        self.lbl_excel = ctk.CTkLabel(self.main_frame, text="Ningún archivo seleccionado", text_color="gray")
-        self.lbl_excel.grid(row=1, column=1, padx=10, pady=10, sticky="w")
-        ctk.CTkButton(self.main_frame, text="Seleccionar", command=self.select_excel).grid(row=1, column=2, padx=10, pady=10)
-        
-        # 3. Output Folder Select
-        ctk.CTkLabel(self.main_frame, text="3. Carpeta de Salida (Contratos):").grid(row=2, column=0, padx=10, pady=10, sticky="w")
-        self.lbl_output = ctk.CTkLabel(self.main_frame, text="Ninguna carpeta seleccionada", text_color="gray")
-        self.lbl_output.grid(row=2, column=1, padx=10, pady=10, sticky="w")
-        ctk.CTkButton(self.main_frame, text="Seleccionar", command=self.select_output).grid(row=2, column=2, padx=10, pady=10)
+        self.grid_rowconfigure(1, weight=1)
 
-        # 4. Email Column configuration (from Excel)
-        ctk.CTkLabel(self.main_frame, text="4. Configuración Excel:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        
-        frame_excel_config = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_excel_config.grid(row=3, column=1, columnspan=2, sticky="ew")
-        frame_excel_config.grid_columnconfigure(1, weight=1)
-        
-        ctk.CTkLabel(frame_excel_config, text="Columna de Email:").grid(row=0, column=0, padx=(0, 10), pady=0, sticky="w")
-        self.entry_email_col = ctk.CTkComboBox(frame_excel_config, values=["Email"], state="normal")
-        self.entry_email_col.set("Email")
-        self.entry_email_col.grid(row=0, column=1, padx=0, pady=5, sticky="ew")
+        # ── Cabecera ──────────────────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=("gray85", "gray20"), corner_radius=0)
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(hdr, text="Generador de Contratos y Correos",
+                     font=("System", 16, "bold")).grid(row=0, column=0, pady=12, padx=20, sticky="w")
+        ctk.CTkLabel(hdr, text=f"v{VERSION}", text_color="gray",
+                     font=("System", 11)).grid(row=0, column=1, pady=12, padx=20, sticky="e")
 
-        ctk.CTkLabel(frame_excel_config, text="Patrón Nombre Archivo:").grid(row=1, column=0, padx=(0, 10), pady=0, sticky="w")
-        self.entry_filename_pattern = ctk.CTkEntry(frame_excel_config, placeholder_text="Ej: {{Apellidos}}, {{Nombre}}")
-        self.entry_filename_pattern.insert(0, "{{Apellidos}}, {{Nombre}}")
-        self.entry_filename_pattern.grid(row=1, column=1, padx=0, pady=5, sticky="ew")
+        # ── Contenido central ─────────────────────────────────────────────────
+        self.content = ctk.CTkFrame(self, fg_color="transparent")
+        self.content.grid(row=1, column=0, sticky="nsew", padx=24, pady=(16, 0))
+        self.content.grid_columnconfigure(0, weight=1)
+        self.content.grid_rowconfigure(1, weight=1)
 
-        # Fila de inserción de campos (se activa al cargar Excel)
-        ctk.CTkLabel(frame_excel_config, text="Insertar campo:").grid(row=2, column=0, padx=(0, 10), pady=(4, 0), sticky="w")
-        frame_insert = ctk.CTkFrame(frame_excel_config, fg_color="transparent")
-        frame_insert.grid(row=2, column=1, sticky="ew", pady=(4, 0))
-        self.combo_fields = ctk.CTkComboBox(frame_insert, values=["(carga un Excel primero)"], state="readonly", width=180)
-        self.combo_fields.set("(carga un Excel primero)")
-        self.combo_fields.pack(side="left", padx=(0, 6))
-        ctk.CTkButton(frame_insert, text="📋 Word", width=75, fg_color="gray40",
-                      command=self._copy_field_to_clipboard).pack(side="left", padx=2)
-        ctk.CTkButton(frame_insert, text="→ Patrón", width=75,
-                      command=lambda: self._insert_field(self.entry_filename_pattern)).pack(side="left", padx=2)
-        ctk.CTkButton(frame_insert, text="→ Asunto", width=75,
-                      command=lambda: self._insert_field(self.entry_subject)).pack(side="left", padx=2)
-        ctk.CTkButton(frame_insert, text="→ Cuerpo", width=75,
-                      command=lambda: self._insert_field(self.txt_body, is_textbox=True)).pack(side="left", padx=2)
+        # Indicador de pasos
+        self._build_step_indicator()
 
-        # Panel de ayuda
-        help_text = (
-            "ℹ️  Carga el Excel primero para ver los campos disponibles. "
-            "Usa 📋 Word para copiar {{campo}} y pegarlo en tu plantilla Word. "
-            "Usa → Patrón / → Asunto / → Cuerpo para insertar campos directamente."
-        )
-        lbl_help = ctk.CTkLabel(
-            self.main_frame, text=help_text,
-            text_color="gray", font=("System", 11),
-            wraplength=620, justify="left"
-        )
-        lbl_help.grid(row=4, column=0, columnspan=3, padx=12, pady=(4, 2), sticky="w")
+        # Frames de cada paso (apilados en la misma celda, se muestran/ocultan)
+        self.step_frames = []
+        self._build_step1()
+        self._build_step2()
+        self._build_step3()
+        self._build_step4()
+        for f in self.step_frames:
+            f.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
 
-        # Divider
-        frame_div = ctk.CTkFrame(self.main_frame, height=2, fg_color="gray50")
-        frame_div.grid(row=5, column=0, columnspan=3, sticky="ew", padx=10, pady=(4, 10))
-        
-        # 5. Email Configuration Toggle
-        self.email_mode = ctk.StringVar(value="manual")
-        
-        # Email settings container
-        self.email_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.email_frame.grid(row=6, column=0, columnspan=3, sticky="ew")
-        self.email_frame.grid_columnconfigure(1, weight=1)
+        # ── Pie de navegación ─────────────────────────────────────────────────
+        nav = ctk.CTkFrame(self, fg_color="transparent")
+        nav.grid(row=2, column=0, sticky="ew", padx=24, pady=12)
+        nav.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkRadioButton(self.email_frame, text="Escribir Asunto y Cuerpo", variable=self.email_mode, value="manual", command=self.toggle_email_mode).grid(row=0, column=0, padx=10, pady=10)
-        ctk.CTkRadioButton(self.email_frame, text="Usar Plantilla de Outlook (.oft)", variable=self.email_mode, value="template", command=self.toggle_email_mode).grid(row=0, column=1, padx=10, pady=10, sticky="w")
+        self.btn_prev = ctk.CTkButton(nav, text="← Anterior", width=120,
+                                      fg_color="gray50", hover_color="gray40",
+                                      command=self._prev_step)
+        self.btn_prev.grid(row=0, column=0, padx=(0, 8))
 
-        # Manual Mode Fields
-        self.lbl_subj = ctk.CTkLabel(self.email_frame, text="Asunto del Correo:")
-        self.lbl_subj.grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.entry_subject = ctk.CTkEntry(self.email_frame, placeholder_text="Asunto: Contrato Adjunto...")
-        self.entry_subject.grid(row=1, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
-        
-        self.lbl_body = ctk.CTkLabel(self.email_frame, text="Cuerpo del Correo:")
-        self.lbl_body.grid(row=2, column=0, padx=10, pady=5, sticky="nw")
-        self.txt_body = ctk.CTkTextbox(self.email_frame, height=100)
-        self.txt_body.grid(row=2, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
+        ctk.CTkLabel(nav, text="", font=("System", 11)).grid(row=0, column=1)  # spacer
 
-        # Template Mode Fields
-        self.lbl_oft = ctk.CTkLabel(self.email_frame, text="Archivo .oft:")
-        self.lbl_oft_path = ctk.CTkLabel(self.email_frame, text="Ningún archivo seleccionado", text_color="gray")
-        self.btn_oft = ctk.CTkButton(self.email_frame, text="Seleccionar .oft", command=self.select_oft)
-        # Initially hide template fields
-        self.toggle_email_mode()
+        self.btn_next = ctk.CTkButton(nav, text="Siguiente →", width=120,
+                                      command=self._next_step)
+        self.btn_next.grid(row=0, column=2, padx=(8, 0))
 
-        # Output format
-        self.output_format = ctk.StringVar(value="pdf")
-        frame_out_format = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_out_format.grid(row=7, column=0, columnspan=3, pady=(10,0))
-        ctk.CTkLabel(frame_out_format, text="Formato Archivo:").pack(side="left", padx=10)
-        ctk.CTkRadioButton(frame_out_format, text="PDF", variable=self.output_format, value="pdf").pack(side="left", padx=10)
-        ctk.CTkRadioButton(frame_out_format, text="Word (.docx)", variable=self.output_format, value="docx").pack(side="left", padx=10)
+        # Versión + actualización (pie derecho)
+        foot = ctk.CTkFrame(self, fg_color="transparent")
+        foot.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 8))
+        foot.grid_columnconfigure(0, weight=1)
+        ctk.CTkButton(foot, text="Buscar actualizaciones", width=160, height=24,
+                      font=("System", 11), fg_color="transparent", border_width=1,
+                      text_color=("gray40", "gray60"),
+                      command=lambda: check_for_updates(self)).grid(row=0, column=1, sticky="e")
 
-        # Cuenta de Outlook
-        frame_account = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_account.grid(row=8, column=0, columnspan=3, pady=(10, 0), padx=10, sticky="ew")
-        frame_account.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(frame_account, text="Cuenta de envío:").grid(row=0, column=0, padx=(0, 10), sticky="w")
-        self.combo_account = ctk.CTkComboBox(frame_account, values=["(cargando cuentas…)"], state="readonly")
-        self.combo_account.set("(cargando cuentas…)")
-        self.combo_account.grid(row=0, column=1, sticky="ew")
-        ctk.CTkButton(frame_account, text="↺", width=32,
-                      command=self._load_outlook_accounts).grid(row=0, column=2, padx=(6, 0))
+        self._restore_config()
+        self._show_step(0)
         self.after(1500, self._load_outlook_accounts)
 
-        # Send Mode
-        self.send_mode = ctk.StringVar(value="draft")
-        frame_send_mode = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_send_mode.grid(row=9, column=0, columnspan=3, pady=(10,0))
-        ctk.CTkRadioButton(frame_send_mode, text="Guardar en Borradores (Draft)", variable=self.send_mode, value="draft").pack(side="left", padx=10)
-        ctk.CTkRadioButton(frame_send_mode, text="Enviar Directamente (Send)", variable=self.send_mode, value="send").pack(side="left", padx=10)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # WIZARD — indicador de pasos
+    # ═══════════════════════════════════════════════════════════════════════════
+    def _build_step_indicator(self):
+        self.ind_frame = ctk.CTkFrame(self.content, fg_color="transparent")
+        self.ind_frame.grid(row=0, column=0, sticky="ew")
+        self.ind_labels = []
+        self.ind_dots   = []
+        cols = len(STEPS) * 2 - 1
+        for i in range(cols):
+            self.ind_frame.grid_columnconfigure(i, weight=1 if i % 2 == 1 else 0)
 
-        # Generate Button
-        self.btn_generate = ctk.CTkButton(self.main_frame, text="Generar Contratos y Correos", command=self.start_generation, height=40, font=("System", 14, "bold"))
-        self.btn_generate.grid(row=10, column=0, columnspan=3, pady=20)
+        for i, name in enumerate(STEPS):
+            col = i * 2
+            dot = ctk.CTkLabel(self.ind_frame, text="●", font=("System", 18),
+                               text_color="gray60", width=28)
+            dot.grid(row=0, column=col)
+            lbl = ctk.CTkLabel(self.ind_frame, text=name, font=("System", 11),
+                               text_color="gray60")
+            lbl.grid(row=1, column=col)
+            self.ind_dots.append(dot)
+            self.ind_labels.append(lbl)
+            if i < len(STEPS) - 1:
+                ctk.CTkLabel(self.ind_frame, text="────", text_color="gray50",
+                             font=("System", 11)).grid(row=0, column=col + 1, sticky="ew")
+
+    def _update_step_indicator(self, step):
+        for i, (dot, lbl) in enumerate(zip(self.ind_dots, self.ind_labels)):
+            if i < step:
+                dot.configure(text="✓", text_color=("green3", "green2"))
+                lbl.configure(text_color=("gray50", "gray50"))
+            elif i == step:
+                dot.configure(text="●", text_color=("dodger blue", "dodger blue"))
+                lbl.configure(text_color=("black", "white"),
+                               font=("System", 11, "bold"))
+            else:
+                dot.configure(text="●", text_color="gray60")
+                lbl.configure(text_color="gray60",
+                               font=("System", 11))
+
+    def _show_step(self, step):
+        self.current_step = step
+        for i, f in enumerate(self.step_frames):
+            if i == step:
+                f.tkraise()
+            else:
+                f.lower()
+        self._update_step_indicator(step)
+        self.btn_prev.configure(state="normal" if step > 0 else "disabled")
+        if step == len(STEPS) - 1:
+            self.btn_next.configure(text="✓ Generar", fg_color=("green4", "green3"),
+                                    hover_color=("green3", "green2"),
+                                    command=self.start_generation)
+        else:
+            self.btn_next.configure(text="Siguiente →", fg_color=("#1f6aa5", "#1f538a"),
+                                    hover_color=("#144870", "#144870"),
+                                    command=self._next_step)
+
+    def _next_step(self):
+        if self._validate_step(self.current_step):
+            self._show_step(self.current_step + 1)
+
+    def _prev_step(self):
+        self._show_step(self.current_step - 1)
+
+    def _validate_step(self, step):
+        if step == 0:
+            if not self.word_template_path:
+                messagebox.showwarning("Faltan datos", "Selecciona la plantilla Word.")
+                return False
+            if not self.excel_data_path:
+                messagebox.showwarning("Faltan datos", "Selecciona el archivo Excel.")
+                return False
+            if not self.output_folder:
+                messagebox.showwarning("Faltan datos", "Selecciona la carpeta de salida.")
+                return False
+        elif step == 1:
+            if not self.entry_email_col.get().strip():
+                messagebox.showwarning("Faltan datos", "Indica la columna de email.")
+                return False
+            if not self.entry_filename_pattern.get().strip():
+                messagebox.showwarning("Faltan datos", "Indica el patrón de nombre de archivo.")
+                return False
+        elif step == 2:
+            if self.email_mode.get() == "template" and not self.outlook_template_path:
+                messagebox.showwarning("Faltan datos", "Selecciona la plantilla .oft de Outlook.")
+                return False
+        return True
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASO 1 — Archivos
+    # ═══════════════════════════════════════════════════════════════════════════
+    def _build_step1(self):
+        f = ctk.CTkFrame(self.content)
+        self.step_frames.append(f)
+        f.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(f, text="Selecciona los archivos necesarios",
+                     font=("System", 13, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=(16, 20), padx=16, sticky="w")
+
+        rows = [
+            ("Plantilla Word (.docx)", "lbl_word",   self.select_word,   "📄"),
+            ("Datos Excel (.xlsx)",    "lbl_excel",  self.select_excel,  "📊"),
+            ("Carpeta de salida",      "lbl_output", self.select_output, "📁"),
+        ]
+        for i, (label, attr, cmd, icon) in enumerate(rows, start=1):
+            ctk.CTkLabel(f, text=f"{icon}  {label}",
+                         font=("System", 12)).grid(row=i*2-1, column=0, columnspan=3,
+                                                    padx=16, pady=(10, 2), sticky="w")
+            lbl = ctk.CTkLabel(f, text="Sin seleccionar", text_color="gray",
+                               font=("System", 11), anchor="w")
+            lbl.grid(row=i*2, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="ew")
+            setattr(self, attr, lbl)
+            ctk.CTkButton(f, text="Seleccionar", width=110, command=cmd).grid(
+                row=i*2, column=2, padx=(0, 16), pady=(0, 4))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASO 2 — Configuración Excel
+    # ═══════════════════════════════════════════════════════════════════════════
+    def _build_step2(self):
+        f = ctk.CTkFrame(self.content)
+        self.step_frames.append(f)
+        f.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(f, text="Configura las columnas del Excel",
+                     font=("System", 13, "bold")).grid(
+            row=0, column=0, columnspan=2, pady=(16, 4), padx=16, sticky="w")
+        ctk.CTkLabel(f, text="Usa {{NombreColumna}} en la plantilla Word y en asunto/cuerpo del correo.",
+                     text_color="gray", font=("System", 11), wraplength=580, justify="left").grid(
+            row=1, column=0, columnspan=2, padx=16, pady=(0, 16), sticky="w")
+
+        # Columna de email
+        ctk.CTkLabel(f, text="Columna de Email:").grid(row=2, column=0, padx=16, pady=6, sticky="w")
+        self.entry_email_col = ctk.CTkComboBox(f, values=["Email"], state="normal")
+        self.entry_email_col.set("Email")
+        self.entry_email_col.grid(row=2, column=1, padx=16, pady=6, sticky="ew")
+
+        # Patrón nombre archivo
+        ctk.CTkLabel(f, text="Patrón nombre archivo:").grid(row=3, column=0, padx=16, pady=6, sticky="w")
+        self.entry_filename_pattern = ctk.CTkEntry(f, placeholder_text="Ej: {{Apellidos}}, {{Nombre}}")
+        self.entry_filename_pattern.insert(0, "{{Apellidos}}, {{Nombre}}")
+        self.entry_filename_pattern.grid(row=3, column=1, padx=16, pady=6, sticky="ew")
+
+        # Separador
+        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+            row=4, column=0, columnspan=2, sticky="ew", padx=16, pady=12)
+
+        # Insertar campo
+        ctk.CTkLabel(f, text="Insertar campo:", font=("System", 12, "bold")).grid(
+            row=5, column=0, padx=16, pady=(0, 6), sticky="w")
+        ctk.CTkLabel(f, text="Selecciona un campo y úsalo donde necesites.",
+                     text_color="gray", font=("System", 11)).grid(
+            row=6, column=0, columnspan=2, padx=16, pady=(0, 8), sticky="w")
+
+        frame_insert = ctk.CTkFrame(f, fg_color="transparent")
+        frame_insert.grid(row=7, column=0, columnspan=2, padx=16, sticky="ew")
+        frame_insert.grid_columnconfigure(0, weight=1)
+
+        self.combo_fields = ctk.CTkComboBox(frame_insert,
+                                            values=["(carga un Excel primero)"],
+                                            state="readonly")
+        self.combo_fields.set("(carga un Excel primero)")
+        self.combo_fields.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+
+        btn_frame = ctk.CTkFrame(frame_insert, fg_color="transparent")
+        btn_frame.grid(row=0, column=1)
+        ctk.CTkButton(btn_frame, text="📋 Copiar", width=90, fg_color="gray40",
+                      command=self._copy_field_to_clipboard).pack(side="left", padx=2)
+        ctk.CTkButton(btn_frame, text="→ Patrón", width=90,
+                      command=lambda: self._insert_field(self.entry_filename_pattern)).pack(side="left", padx=2)
+        ctk.CTkButton(btn_frame, text="→ Asunto", width=90,
+                      command=lambda: self._insert_field(self.entry_subject)).pack(side="left", padx=2)
+        ctk.CTkButton(btn_frame, text="→ Cuerpo", width=90,
+                      command=lambda: self._insert_field(self.txt_body, is_textbox=True)).pack(side="left", padx=2)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASO 3 — Correo
+    # ═══════════════════════════════════════════════════════════════════════════
+    def _build_step3(self):
+        f = ctk.CTkFrame(self.content)
+        self.step_frames.append(f)
+        f.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(f, text="Configura el correo electrónico",
+                     font=("System", 13, "bold")).grid(
+            row=0, column=0, columnspan=3, pady=(16, 12), padx=16, sticky="w")
+
+        # Modo email
+        self.email_mode = ctk.StringVar(value="manual")
+        mode_frame = ctk.CTkFrame(f, fg_color="transparent")
+        mode_frame.grid(row=1, column=0, columnspan=3, padx=16, sticky="w")
+        ctk.CTkRadioButton(mode_frame, text="Escribir asunto y cuerpo",
+                           variable=self.email_mode, value="manual",
+                           command=self.toggle_email_mode).pack(side="left", padx=(0, 20))
+        ctk.CTkRadioButton(mode_frame, text="Usar plantilla Outlook (.oft)",
+                           variable=self.email_mode, value="template",
+                           command=self.toggle_email_mode).pack(side="left")
+
+        # Contenedor intercambiable (manual / template)
+        self.email_inner = ctk.CTkFrame(f, fg_color="transparent")
+        self.email_inner.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8)
+        self.email_inner.grid_columnconfigure(1, weight=1)
+
+        # Manual
+        self.lbl_subj = ctk.CTkLabel(self.email_inner, text="Asunto:")
+        self.entry_subject = ctk.CTkEntry(self.email_inner,
+                                          placeholder_text="Ej: Contrato adjunto — {{Nombre}}")
+        self.lbl_body = ctk.CTkLabel(self.email_inner, text="Cuerpo:")
+        self.txt_body = ctk.CTkTextbox(self.email_inner, height=110)
+
+        # Template
+        self.lbl_oft      = ctk.CTkLabel(self.email_inner, text="Archivo .oft:")
+        self.lbl_oft_path = ctk.CTkLabel(self.email_inner, text="Sin seleccionar",
+                                          text_color="gray")
+        self.btn_oft      = ctk.CTkButton(self.email_inner, text="Seleccionar .oft",
+                                           command=self.select_oft)
+        self.toggle_email_mode()
+
+        # Separador
+        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+            row=3, column=0, columnspan=3, sticky="ew", padx=16, pady=10)
+
+        # Cuenta + formato + modo envío
+        ctk.CTkLabel(f, text="Cuenta de envío:").grid(row=4, column=0, padx=16, pady=4, sticky="w")
+        acc_row = ctk.CTkFrame(f, fg_color="transparent")
+        acc_row.grid(row=4, column=1, columnspan=2, sticky="ew", padx=16, pady=4)
+        acc_row.grid_columnconfigure(0, weight=1)
+        self.combo_account = ctk.CTkComboBox(acc_row, values=["(cargando…)"], state="readonly")
+        self.combo_account.set("(cargando…)")
+        self.combo_account.grid(row=0, column=0, sticky="ew")
+        ctk.CTkButton(acc_row, text="↺", width=32,
+                      command=self._load_outlook_accounts).grid(row=0, column=1, padx=(6, 0))
+
+        ctk.CTkLabel(f, text="Formato archivo:").grid(row=5, column=0, padx=16, pady=4, sticky="w")
+        self.output_format = ctk.StringVar(value="pdf")
+        fmt_row = ctk.CTkFrame(f, fg_color="transparent")
+        fmt_row.grid(row=5, column=1, columnspan=2, sticky="w", padx=16, pady=4)
+        ctk.CTkRadioButton(fmt_row, text="PDF", variable=self.output_format, value="pdf").pack(side="left", padx=(0, 16))
+        ctk.CTkRadioButton(fmt_row, text="Word (.docx)", variable=self.output_format, value="docx").pack(side="left")
+
+        ctk.CTkLabel(f, text="Modo envío:").grid(row=6, column=0, padx=16, pady=4, sticky="w")
+        self.send_mode = ctk.StringVar(value="draft")
+        snd_row = ctk.CTkFrame(f, fg_color="transparent")
+        snd_row.grid(row=6, column=1, columnspan=2, sticky="w", padx=16, pady=4)
+        ctk.CTkRadioButton(snd_row, text="Guardar en Borradores", variable=self.send_mode, value="draft").pack(side="left", padx=(0, 16))
+        ctk.CTkRadioButton(snd_row, text="Enviar directamente", variable=self.send_mode, value="send").pack(side="left")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PASO 4 — Generar
+    # ═══════════════════════════════════════════════════════════════════════════
+    def _build_step4(self):
+        f = ctk.CTkFrame(self.content)
+        self.step_frames.append(f)
+        f.grid_columnconfigure(0, weight=1)
+        f.grid_rowconfigure(2, weight=1)
+
+        ctk.CTkLabel(f, text="Todo listo — pulsa Generar para empezar",
+                     font=("System", 13, "bold")).grid(
+            row=0, column=0, pady=(16, 4), padx=16, sticky="w")
+        ctk.CTkLabel(f, text="El progreso aparecerá en el log de abajo.",
+                     text_color="gray", font=("System", 11)).grid(
+            row=1, column=0, padx=16, pady=(0, 10), sticky="w")
 
         # Barra de progreso
-        self.progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.progress_frame.grid(row=11, column=0, columnspan=3, sticky="ew", padx=10, pady=(5, 0))
-        self.progress_frame.grid_columnconfigure(0, weight=1)
-        self.progress_bar = ctk.CTkProgressBar(self.progress_frame)
-        self.progress_bar.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+        prog_frame = ctk.CTkFrame(f, fg_color="transparent")
+        prog_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        prog_frame.grid_columnconfigure(0, weight=1)
+        self.progress_bar = ctk.CTkProgressBar(prog_frame)
+        self.progress_bar.grid(row=0, column=0, sticky="ew")
         self.progress_bar.set(0)
-        self.lbl_progress = ctk.CTkLabel(self.progress_frame, text="", text_color="gray", font=("System", 11))
-        self.lbl_progress.grid(row=1, column=0, sticky="w")
+        self.lbl_progress = ctk.CTkLabel(prog_frame, text="", text_color="gray",
+                                          font=("System", 11))
+        self.lbl_progress.grid(row=1, column=0, sticky="w", pady=(2, 0))
 
-        # Log Textbox
-        self.log_box = ctk.CTkTextbox(self.main_frame, height=150, state="disabled")
-        self.log_box.grid(row=12, column=0, columnspan=3, padx=10, pady=10, sticky="nsew")
-        self.main_frame.grid_rowconfigure(12, weight=1)
+        # Log
+        self.log_box = ctk.CTkTextbox(f, state="disabled")
+        self.log_box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        f.grid_rowconfigure(3, weight=1)
 
-        # Restaurar configuración guardada
-        self._restore_config()
+        # Botón generar (también en el nav, pero lo mantenemos aquí como referencia)
+        self.btn_generate = self.btn_next   # se re-usa el btn_next en el último paso
 
-        # Barra inferior: versión + botón de actualización manual
-        frame_bottom = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        frame_bottom.grid(row=13, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10))
-        frame_bottom.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(frame_bottom, text=f"Versión: {VERSION}", text_color="gray", font=("System", 11)).grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(
-            frame_bottom,
-            text="Buscar actualizaciones",
-            width=160,
-            height=28,
-            font=("System", 11),
-            command=lambda: check_for_updates(self)
-        ).grid(row=0, column=1, sticky="e")
-
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Outlook accounts
+    # ═══════════════════════════════════════════════════════════════════════════
     def _load_outlook_accounts(self):
-        """Obtiene las cuentas configuradas en Outlook y rellena el ComboBox."""
         def fetch():
             try:
                 import pythoncom
@@ -240,8 +416,7 @@ class App(ctk.CTk):
                 self.after(0, lambda: self._set_account_combo(names))
             except Exception:
                 self.after(0, lambda: self.combo_account.configure(
-                    values=["(no se pudieron cargar las cuentas)"]
-                ))
+                    values=["(no se pudieron cargar las cuentas)"]))
         threading.Thread(target=fetch, daemon=True).start()
 
     def _set_account_combo(self, names):
@@ -252,8 +427,10 @@ class App(ctk.CTk):
             self.combo_account.configure(values=["(sin cuentas)"])
             self.combo_account.set("(sin cuentas)")
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Columnas Excel
+    # ═══════════════════════════════════════════════════════════════════════════
     def _update_columns(self):
-        """Lee las cabeceras del Excel y actualiza los ComboBox de campos."""
         try:
             cols = list(pd.read_excel(self.excel_data_path, nrows=0).columns.astype(str))
         except Exception:
@@ -263,22 +440,19 @@ class App(ctk.CTk):
         self.combo_fields.configure(values=cols, state="readonly")
         if cols:
             self.combo_fields.set(cols[0])
-            # Si el valor actual de email col no existe en las nuevas cols, sugerir la primera
             if self.entry_email_col.get() not in cols:
                 self.entry_email_col.set(cols[0])
 
     def _copy_field_to_clipboard(self):
-        """Copia {{campo}} al portapapeles para pegar en la plantilla Word."""
         col = self.combo_fields.get()
         if not col or col == "(carga un Excel primero)":
             return
         tag = f"{{{{{col}}}}}"
         self.clipboard_clear()
         self.clipboard_append(tag)
-        messagebox.showinfo("Copiado", f"{tag} copiado al portapapeles.\nPégalo en tu plantilla Word.", icon="info")
+        messagebox.showinfo("Copiado", f"{tag} copiado al portapapeles.\nPégalo en tu plantilla Word.")
 
     def _insert_field(self, widget, is_textbox=False):
-        """Inserta {{campo}} en la posición del cursor del widget destino."""
         col = self.combo_fields.get()
         if not col or col == "(carga un Excel primero)":
             return
@@ -289,25 +463,26 @@ class App(ctk.CTk):
             widget.insert(widget.index("insert"), tag)
         widget.focus_set()
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Configuración persistente
+    # ═══════════════════════════════════════════════════════════════════════════
     def _restore_config(self):
         cfg = load_config()
         if not cfg:
             return
-        # Rutas de archivos
         for attr, lbl, key in [
-            ("word_template_path",   self.lbl_word,   "word_template_path"),
-            ("excel_data_path",      self.lbl_excel,  "excel_data_path"),
-            ("output_folder",        self.lbl_output, "output_folder"),
-            ("outlook_template_path",self.lbl_oft_path,"outlook_template_path"),
+            ("word_template_path",    self.lbl_word,    "word_template_path"),
+            ("excel_data_path",       self.lbl_excel,   "excel_data_path"),
+            ("output_folder",         self.lbl_output,  "output_folder"),
+            ("outlook_template_path", self.lbl_oft_path,"outlook_template_path"),
         ]:
             path = cfg.get(key, "")
             if path and os.path.exists(path):
                 setattr(self, attr, path)
-                lbl.configure(text=os.path.basename(path) if os.path.isfile(path) else path, text_color="black")
-        # Actualizar columnas si hay Excel guardado
+                lbl.configure(text=os.path.basename(path) if os.path.isfile(path) else path,
+                               text_color="black")
         if self.excel_data_path:
             self._update_columns()
-        # Email col (ComboBox)
         if cfg.get("email_col"):
             self.entry_email_col.set(cfg["email_col"])
         if cfg.get("filename_pattern"):
@@ -319,7 +494,6 @@ class App(ctk.CTk):
         if cfg.get("email_body"):
             self.txt_body.delete("1.0", "end")
             self.txt_body.insert("1.0", cfg["email_body"])
-        # Modo email, formato y modo envío
         if cfg.get("email_mode"):
             self.email_mode.set(cfg["email_mode"])
             self.toggle_email_mode()
@@ -343,116 +517,96 @@ class App(ctk.CTk):
             "send_mode":             self.send_mode.get(),
         })
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Log
+    # ═══════════════════════════════════════════════════════════════════════════
     def log(self, text):
         self.log_box.configure(state="normal")
         self.log_box.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Toggle email mode
+    # ═══════════════════════════════════════════════════════════════════════════
     def toggle_email_mode(self):
-        mode = self.email_mode.get()
-        if mode == "manual":
+        if self.email_mode.get() == "manual":
             self.lbl_oft.grid_forget()
             self.lbl_oft_path.grid_forget()
             self.btn_oft.grid_forget()
-            
-            self.lbl_subj.grid(row=1, column=0, padx=10, pady=5, sticky="w")
-            self.entry_subject.grid(row=1, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
-            self.lbl_body.grid(row=2, column=0, padx=10, pady=5, sticky="nw")
-            self.txt_body.grid(row=2, column=1, columnspan=2, padx=10, pady=5, sticky="ew")
+            self.lbl_subj.grid(row=0, column=0, padx=8, pady=(10, 4), sticky="w")
+            self.entry_subject.grid(row=0, column=1, padx=8, pady=(10, 4), sticky="ew")
+            self.lbl_body.grid(row=1, column=0, padx=8, pady=4, sticky="nw")
+            self.txt_body.grid(row=1, column=1, padx=8, pady=4, sticky="ew")
         else:
             self.lbl_subj.grid_forget()
             self.entry_subject.grid_forget()
             self.lbl_body.grid_forget()
             self.txt_body.grid_forget()
-            
-            self.lbl_oft.grid(row=1, column=0, padx=10, pady=5, sticky="w")
-            self.lbl_oft_path.grid(row=1, column=1, padx=10, pady=5, sticky="w")
-            self.btn_oft.grid(row=1, column=2, padx=10, pady=5)
+            self.lbl_oft.grid(row=0, column=0, padx=8, pady=(10, 4), sticky="w")
+            self.lbl_oft_path.grid(row=0, column=1, padx=8, pady=(10, 4), sticky="w")
+            self.btn_oft.grid(row=1, column=0, columnspan=2, padx=8, pady=4, sticky="w")
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Selectores de archivo
+    # ═══════════════════════════════════════════════════════════════════════════
     def select_word(self):
-        filename = filedialog.askopenfilename(title="Seleccionar Plantilla Word", filetypes=[("Word Documents", "*.docx")])
-        if filename:
-            self.word_template_path = filename
-            self.lbl_word.configure(text=os.path.basename(filename), text_color="black")
+        f = filedialog.askopenfilename(title="Plantilla Word", filetypes=[("Word", "*.docx")])
+        if f:
+            self.word_template_path = f
+            self.lbl_word.configure(text=os.path.basename(f), text_color="black")
             self._save_config()
 
     def select_excel(self):
-        filename = filedialog.askopenfilename(title="Seleccionar Datos Excel", filetypes=[("Excel Files", "*.xlsx")])
-        if filename:
-            self.excel_data_path = filename
-            self.lbl_excel.configure(text=os.path.basename(filename), text_color="black")
+        f = filedialog.askopenfilename(title="Datos Excel", filetypes=[("Excel", "*.xlsx")])
+        if f:
+            self.excel_data_path = f
+            self.lbl_excel.configure(text=os.path.basename(f), text_color="black")
             self._update_columns()
             self._save_config()
 
     def select_output(self):
-        foldername = filedialog.askdirectory(title="Seleccionar Carpeta de Salida")
-        if foldername:
-            self.output_folder = foldername
-            self.lbl_output.configure(text=foldername, text_color="black")
+        d = filedialog.askdirectory(title="Carpeta de salida")
+        if d:
+            self.output_folder = d
+            self.lbl_output.configure(text=d, text_color="black")
             self._save_config()
 
     def select_oft(self):
-        filename = filedialog.askopenfilename(title="Seleccionar Plantilla Outlook", filetypes=[("Outlook Template", "*.oft")])
-        if filename:
-            self.outlook_template_path = filename
-            self.lbl_oft_path.configure(text=os.path.basename(filename), text_color="black")
+        f = filedialog.askopenfilename(title="Plantilla Outlook", filetypes=[("Outlook Template", "*.oft")])
+        if f:
+            self.outlook_template_path = f
+            self.lbl_oft_path.configure(text=os.path.basename(f), text_color="black")
             self._save_config()
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Generación
+    # ═══════════════════════════════════════════════════════════════════════════
     def start_generation(self):
-        if not self.word_template_path:
-            messagebox.showwarning("Faltan datos", "Por favor, seleccione la plantilla Word.")
-            return
-        if not self.excel_data_path:
-            messagebox.showwarning("Faltan datos", "Por favor, seleccione el archivo Excel de datos.")
-            return
-        if not self.output_folder:
-            messagebox.showwarning("Faltan datos", "Por favor, seleccione una carpeta de salida.")
-            return
-        
-        email_col = self.entry_email_col.get().strip()
-        if not email_col:
-            messagebox.showwarning("Faltan datos", "Por favor, especifique el nombre de la columna de Email.")
-            return
-
-        filename_pattern = self.entry_filename_pattern.get().strip()
-        if not filename_pattern:
-            messagebox.showwarning("Faltan datos", "Por favor, especifique un patrón para el nombre de archivo.")
-            return
-
-        mode = self.email_mode.get()
-        if mode == "manual":
-            subject = self.entry_subject.get()
-            body = self.txt_body.get("1.0", "end-1c")
-            if not subject:
-                if not messagebox.askyesno("Confirmar", "El asunto está vacío. ¿Continuar de todos modos?"): return
-        else:
-            if not self.outlook_template_path:
-                messagebox.showwarning("Faltan datos", "Por favor, seleccione la plantilla .oft de Outlook.")
+        for step in range(3):
+            if not self._validate_step(step):
+                self._show_step(step)
                 return
 
         self._save_config()
-        self.btn_generate.configure(state="disabled")
+        self._show_step(3)
         self.progress_bar.set(0)
         self.lbl_progress.configure(text="")
         self.log("=== INICIANDO PROCESO ===")
-
-        # Run in a separate thread so UI doesn't freeze
         threading.Thread(target=self.process_data, daemon=True).start()
 
     def process_data(self):
         try:
             email_col = self.entry_email_col.get().strip()
-            mode = self.email_mode.get()
-            s_mode = self.send_mode.get()
-            
+            mode      = self.email_mode.get()
+            s_mode    = self.send_mode.get()
+
             self.log("Leyendo Excel...")
             df = pd.read_excel(self.excel_data_path)
-            
+
             if email_col not in df.columns:
-                self.log(f"ERROR: La columna '{email_col}' no se encuentra en el Excel.")
+                self.log(f"ERROR: Columna '{email_col}' no encontrada.")
                 self.log(f"Columnas disponibles: {', '.join(df.columns)}")
-                self.btn_generate.configure(state="normal")
                 return
 
             try:
@@ -460,152 +614,115 @@ class App(ctk.CTk):
                 pythoncom.CoInitialize()
                 outlook = win32.Dispatch("Outlook.Application")
 
-                # Resolver la cuenta seleccionada
-                selected_account_label = self.combo_account.get()
-                send_account = None
+                selected_label = self.combo_account.get()
+                send_account   = None
                 for name, smtp in self.outlook_accounts:
-                    if selected_account_label.startswith(name):
-                        try:
-                            accounts = outlook.Session.Accounts
-                            for i in range(1, accounts.Count + 1):
-                                if accounts.Item(i).SmtpAddress == smtp:
-                                    send_account = accounts.Item(i)
-                                    break
-                        except Exception:
-                            pass
+                    if selected_label.startswith(name):
+                        accounts = outlook.Session.Accounts
+                        for i in range(1, accounts.Count + 1):
+                            if accounts.Item(i).SmtpAddress == smtp:
+                                send_account = accounts.Item(i)
+                                break
                         break
                 if send_account:
-                    self.log(f"Cuenta de envío: {selected_account_label}")
+                    self.log(f"Cuenta: {selected_label}")
 
-                # Only init Word if PDF is selected to speed up DOCX-only runs
                 word_app = None
                 if self.output_format.get() == "pdf":
                     word_app = win32.Dispatch("Word.Application")
                     word_app.Visible = False
             except Exception as e:
-                self.log(f"ERROR al iniciar Outlook o Word: {e}")
-                self.btn_generate.configure(state="normal")
+                self.log(f"ERROR iniciando Outlook/Word: {e}")
                 return
 
             rows_total = len(df)
-            self.log(f"Se encontraron {rows_total} registros a procesar.")
+            self.log(f"Registros a procesar: {rows_total}")
             self.after(0, lambda: self.lbl_progress.configure(text=f"0 / {rows_total}"))
 
             for index, row in df.iterrows():
                 row_num = index + 1
                 try:
-                    # Context for DocxTemplate and Email
-                    context = {}
-                    for col in df.columns:
-                        val = row[col]
-                        # Handling NaNs
-                        if pd.isna(val):
-                            val = ""
-                        context[str(col)] = str(val)
+                    context = {str(col): ("" if pd.isna(row[col]) else str(row[col]))
+                               for col in df.columns}
 
-                    # 1. Generate Word Document
                     doc = DocxTemplate(self.word_template_path)
                     doc.render(context)
-                    
-                    # Create a friendly filename based on the pattern
-                    pattern = self.entry_filename_pattern.get().strip()
+
+                    pattern      = self.entry_filename_pattern.get().strip()
                     name_for_file = substitute_variables(pattern, context)
-                    name_for_file = re.sub(r'\{\{.*?\}\}', '', name_for_file)  # limpiar tags sin valor
-                    
+                    name_for_file = re.sub(r'\{\{.*?\}\}', '', name_for_file)
                     if not name_for_file.strip():
-                        name_for_file = f"Contrato_{index+1}"
-                        
-                    # Remove invalid characters for windows file paths but let sensible chars be part of the name
-                    safe_name = "".join([c for c in name_for_file if c.isalpha() or c.isdigit() or c in [' ', ',', '-', '_']]).strip()
-                    
-                    output_docx_path = os.path.join(self.output_folder, f"{safe_name}.docx")
-                    output_pdf_path = os.path.join(self.output_folder, f"{safe_name}.pdf")
-                    
-                    doc.save(output_docx_path)
-                    
-                    # Convert to PDF
+                        name_for_file = f"Contrato_{row_num}"
+                    safe_name = "".join(c for c in name_for_file
+                                        if c.isalpha() or c.isdigit() or c in ' ,-_').strip()
+
+                    out_docx = os.path.join(self.output_folder, f"{safe_name}.docx")
+                    out_pdf  = os.path.join(self.output_folder, f"{safe_name}.pdf")
+                    doc.save(out_docx)
+
                     if self.output_format.get() == "pdf":
                         try:
-                            self.log(f"Convirtiendo {safe_name} a PDF...")
-                            word_doc = word_app.Documents.Open(os.path.abspath(output_docx_path))
-                            word_doc.SaveAs(os.path.abspath(output_pdf_path), FileFormat=17) # 17 is wdFormatPDF
-                            word_doc.Close()
-                            
-                            # Optionally remove the DOCX file if you only want the PDF
-                            try:
-                                os.remove(output_docx_path)
-                            except:
-                                pass
-                            
-                            final_attachment_path = output_pdf_path
+                            self.log(f"Convirtiendo {safe_name} a PDF…")
+                            wd = word_app.Documents.Open(os.path.abspath(out_docx))
+                            wd.SaveAs(os.path.abspath(out_pdf), FileFormat=17)
+                            wd.Close()
+                            try: os.remove(out_docx)
+                            except: pass
+                            final_path = out_pdf
                         except Exception as pdf_err:
-                            self.log(f"Error convirtiendo a PDF para {safe_name}: {pdf_err}. Se usará el Word.")
-                            final_attachment_path = output_docx_path
+                            self.log(f"Error PDF {safe_name}: {pdf_err}. Usando Word.")
+                            final_path = out_docx
                     else:
-                        final_attachment_path = output_docx_path
-                    
-                    # 2. Prepare Email
+                        final_path = out_docx
+
                     dest_email = context.get(email_col, "").strip()
                     if not dest_email:
-                        self.log(f"Fila {index+1}: Saltado (sin email válido). Archivo generado: {os.path.basename(final_attachment_path)}")
+                        self.log(f"Fila {row_num}: sin email — archivo: {os.path.basename(final_path)}")
                         continue
 
                     if mode == "manual":
                         mail = outlook.CreateItem(0)
-                        
-                        subject_f = self.entry_subject.get()
-                        body_f = self.txt_body.get("1.0", "end-1c")
-                        
-                        subject_f = substitute_variables(subject_f, context)
-                        body_f    = substitute_variables(body_f, context)
-                            
-                        mail.Subject = subject_f
-                        body_esc = html.escape(body_f).replace("\n", "<br>")
+                        mail.Subject  = substitute_variables(self.entry_subject.get(), context)
+                        body_esc      = html.escape(substitute_variables(
+                            self.txt_body.get("1.0", "end-1c"), context)).replace("\n", "<br>")
                         mail.HTMLBody = f"<html><body>{body_esc}</body></html>"
-                        
-                    else: # Template mode
+                    else:
                         mail = outlook.CreateItemFromTemplate(self.outlook_template_path)
-                        
-                        try: body_orig = mail.HTMLBody 
-                        except: body_orig = mail.Body
-                        
-                        body_orig = substitute_variables(body_orig, context)
-                        try: mail.HTMLBody = body_orig
-                        except: mail.Body = body_orig
-
+                        try:
+                            mail.HTMLBody = substitute_variables(mail.HTMLBody, context)
+                        except:
+                            mail.Body = substitute_variables(mail.Body, context)
                         mail.Subject = substitute_variables(mail.Subject or "", context)
 
                     mail.To = dest_email
                     if send_account:
                         mail.SendUsingAccount = send_account
-                    mail.Attachments.Add(os.path.abspath(final_attachment_path))
-                    
+                    mail.Attachments.Add(os.path.abspath(final_path))
+
                     if s_mode == "send":
                         mail.Send()
-                        action_str = "Enviado a"
+                        action = "Enviado a"
                     else:
                         mail.Save()
-                        action_str = "Guardado borrador para"
-                        
-                    self.log(f"Fila {row_num}: OK - Doc: {os.path.basename(final_attachment_path)} | Correo: {action_str} {dest_email}")
+                        action = "Borrador para"
+
+                    self.log(f"Fila {row_num}: OK — {os.path.basename(final_path)} | {action} {dest_email}")
 
                 except Exception as e:
-                    self.log(f"Error procesando fila {row_num}: {e}")
-
+                    self.log(f"Error fila {row_num}: {e}")
                 finally:
-                    progress = row_num / rows_total
-                    self.after(0, lambda p=progress, n=row_num, t=rows_total: (
+                    p = row_num / rows_total
+                    self.after(0, lambda p=p, n=row_num, t=rows_total: (
                         self.progress_bar.set(p),
                         self.lbl_progress.configure(text=f"{n} / {t}")
                     ))
 
             self.log("=== PROCESO COMPLETADO ===")
-            messagebox.showinfo("Completado", "El proceso de generación ha finalizado.")
+            messagebox.showinfo("Completado", "El proceso ha finalizado.")
 
         except Exception as e:
             self.log(f"Error general: {e}")
         finally:
-            self.btn_generate.configure(state="normal")
             try:
                 if word_app is not None:
                     word_app.Quit()
