@@ -467,6 +467,18 @@ class App(ctk.CTk):
                                           font=("Segoe UI", 11))
         self.lbl_progress.grid(row=1, column=0, sticky="w", pady=(2, 0))
 
+        self.is_running = False
+        self.btn_stop = ctk.CTkButton(prog_frame, text="Detener", width=80, height=24,
+                                      fg_color="#c93434", hover_color="#a82b2b",
+                                      command=self._stop_generation, state="disabled")
+        self.btn_stop.grid(row=1, column=1, sticky="e", pady=(2, 0))
+
+    def _stop_generation(self):
+        if self.is_running:
+            self.is_running = False
+            self.log("Solicitando detención del proceso... (se detendrá tras el contrato actual)")
+            self.btn_stop.configure(state="disabled")
+
         # Log
         self.log_box = ctk.CTkTextbox(f, state="disabled")
         self.log_box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 16))
@@ -745,8 +757,7 @@ class App(ctk.CTk):
                 return False
         elif mode == "autofirma":
             try:
-                # Quitamos 'commandline' completamente para que invoque la aplicación visual de AutoFirma normalmente
-                cmd = ["AutoFirma", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf"]
+                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf", "-certgui"]
                 self.log("Abriendo AutoFirma (por favor revisa si pide PIN/Certificado en una ventana nueva)...")
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
@@ -776,6 +787,10 @@ class App(ctk.CTk):
         self.progress_bar.set(0)
         self.lbl_progress.configure(text="")
         self.log("=== INICIANDO PROCESO ===")
+        self.is_running = True
+        self.btn_stop.configure(state="normal")
+        self.btn_next.configure(state="disabled")
+        self.btn_prev.configure(state="disabled")
         threading.Thread(target=self.process_data, daemon=True).start()
 
     def process_data(self):
@@ -828,6 +843,10 @@ class App(ctk.CTk):
             self.after(0, lambda: self.lbl_progress.configure(text=f"0 / {rows_total}"))
 
             for index, row in df.iterrows():
+                if not getattr(self, "is_running", True):
+                    self.log("=== PROCESO DETENIDO POR EL USUARIO ===")
+                    break
+                    
                 row_num = index + 1
                 try:
                     context = {str(col): ("" if pd.isna(row[col]) else str(row[col]))
@@ -930,12 +949,17 @@ class App(ctk.CTk):
                         self.lbl_progress.configure(text=f"{n} / {t}")
                     ))
 
-            self.log("=== PROCESO COMPLETADO ===")
-            messagebox.showinfo("Completado", "El proceso ha finalizado.")
+            if self.is_running:
+                self.log("=== PROCESO COMPLETADO ===")
+                self.after(0, lambda: messagebox.showinfo("Completado", "El proceso ha finalizado."))
 
         except Exception as e:
             self.log(f"Error general: {e}")
         finally:
+            self.is_running = False
+            self.after(0, lambda: self.btn_stop.configure(state="disabled"))
+            self.after(0, lambda: self.btn_next.configure(state="normal"))
+            self.after(0, lambda: self.btn_prev.configure(state="normal"))
             try:
                 if word_app is not None:
                     word_app.Quit()

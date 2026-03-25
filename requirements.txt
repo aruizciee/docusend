@@ -7,4 +7,4 @@ pyinstaller
 requests
 pyhanko
 cryptography
-pyOpenSSL
+pyOpenSSL<24.0.0
