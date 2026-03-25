@@ -714,6 +714,9 @@ class App(ctk.CTk):
             password = self.entry_pfx_pass.get()
             try:
                 signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, b"" if not password else password.encode())
+                if signer.signing_key is None:
+                    self.log("ERROR: El archivo seleccionado no contiene una clave privada válida (solo el certificado público).")
+                    return False
                 with open(input_pdf, 'rb') as doc_b:
                     pdf_r = PdfFileReader(doc_b)
                     with open(output_pdf, 'wb') as doc_w:
@@ -728,9 +731,10 @@ class App(ctk.CTk):
                 return False
         elif mode == "autofirma":
             try:
-                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf", "-store", "auto"]
-                self.log("Abriendo AutoFirma (por favor revisa si pide PIN/Certificado)...")
-                result = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                # Remove -store auto to force GUI and remove CREATE_NO_WINDOW to prevent suppressing the Java dialogue
+                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf"]
+                self.log("Abriendo AutoFirma (por favor revisa si pide PIN/Certificado en una ventana nueva)...")
+                result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
                     return True
                 else:
