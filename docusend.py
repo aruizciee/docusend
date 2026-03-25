@@ -18,7 +18,7 @@ try:
     from pyhanko.sign import signers
     from pyhanko.pdf_utils.reader import PdfFileReader
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-    import OpenSSL
+    from OpenSSL import crypto
     PYHANKO_AVAILABLE = True
 except ImportError:
     PYHANKO_AVAILABLE = False
@@ -715,11 +715,11 @@ class App(ctk.CTk):
             try:
                 try:
                     with open(self.pfx_path, 'rb') as f_pfx:
-                        p12 = OpenSSL.crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('utf-8'))
+                        p12 = crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('utf-8'))
                 except Exception as ssl_err:
                     # Intento alternativo con latin1 si utf-8 no funciona (contraseñas con caracteres especiales en Windows antiguo)
                     with open(self.pfx_path, 'rb') as f_pfx:
-                        p12 = OpenSSL.crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('latin1'))
+                        p12 = crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('latin1'))
 
                 cert_crypto = p12.get_certificate().to_cryptography()
                 priv_key_crypto = p12.get_privatekey()
@@ -745,8 +745,8 @@ class App(ctk.CTk):
                 return False
         elif mode == "autofirma":
             try:
-                # Remove -store auto to force GUI and remove CREATE_NO_WINDOW to prevent suppressing the Java dialogue
-                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf"]
+                # Remove -store auto to force GUI and add -gui to show the Java dialogue
+                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf", "-gui"]
                 self.log("Abriendo AutoFirma (por favor revisa si pide PIN/Certificado en una ventana nueva)...")
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
