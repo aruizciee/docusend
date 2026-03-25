@@ -9,8 +9,18 @@ import json
 import html
 from datetime import datetime
 import threading
+import subprocess
+from io import BytesIO
 from auto_updater import check_for_updates
 from version import VERSION
+
+try:
+    from pyhanko.sign import signers
+    from pyhanko.pdf_utils.reader import PdfFileReader
+    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    PYHANKO_AVAILABLE = True
+except ImportError:
+    PYHANKO_AVAILABLE = False
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".generador_contratos_config.json")
 
@@ -282,6 +292,38 @@ class App(ctk.CTk):
                       command=self._copy_field_to_clipboard).pack(side="left", padx=2)
         ctk.CTkButton(btn_frame, text="→ Patrón", width=90,
                       command=lambda: self._insert_field(self.entry_filename_pattern)).pack(side="left", padx=2)
+
+        # ── Firma Digital ──────────────────────────────────────────────────────
+        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+            row=7, column=0, columnspan=2, sticky="ew", padx=16, pady=(16, 8))
+
+        self.enable_signature = ctk.BooleanVar(value=False)
+        self.chk_sign = ctk.CTkCheckBox(f, text="Firmar digitalmente los PDFs", font=("Segoe UI", 12, "bold"),
+                                        variable=self.enable_signature, command=self.toggle_signature_ui)
+        self.chk_sign.grid(row=8, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
+
+        self.sign_options_frame = ctk.CTkFrame(f, fg_color="transparent")
+        self.sign_options_frame.grid(row=9, column=0, columnspan=2, sticky="ew", padx=32)
+        self.sign_options_frame.grid_remove()  # Hidden by default
+
+        self.sign_mode = ctk.StringVar(value="pfx")
+        rad_frame = ctk.CTkFrame(self.sign_options_frame, fg_color="transparent")
+        rad_frame.pack(fill="x", pady=4)
+        ctk.CTkRadioButton(rad_frame, text="Certificado PFX (.p12)", variable=self.sign_mode, value="pfx",
+                           command=self.toggle_sign_mode_ui).pack(side="left", padx=(0, 16))
+        ctk.CTkRadioButton(rad_frame, text="AutoFirma (Certificado de Windows)", variable=self.sign_mode, value="autofirma",
+                           command=self.toggle_sign_mode_ui).pack(side="left")
+
+        self.pfx_frame = ctk.CTkFrame(self.sign_options_frame, fg_color="transparent")
+        self.pfx_frame.pack(fill="x", pady=4)
+
+        self.lbl_pfx_path = ctk.CTkLabel(self.pfx_frame, text="Ningún certificado seleccionado", text_color=("gray60", "gray50"), font=("Segoe UI", 11))
+        self.lbl_pfx_path.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
+
+        ctk.CTkButton(self.pfx_frame, text="Seleccionar PFX", width=120, command=self.select_pfx).grid(row=1, column=0, sticky="w", padx=(0, 8))
+        self.entry_pfx_pass = ctk.CTkEntry(self.pfx_frame, placeholder_text="Contraseña PFX", show="*", width=140)
+        self.entry_pfx_pass.grid(row=1, column=1, sticky="w")
+        self.pfx_path = ""
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PASO 3 — Correo
@@ -642,6 +684,66 @@ class App(ctk.CTk):
             self.lbl_oft_path.configure(text=os.path.basename(f), text_color="black")
             self._save_config()
 
+    def select_pfx(self):
+        f = filedialog.askopenfilename(title="Certificado PFX/P12", filetypes=[("Certificados", "*.pfx *.p12")])
+        if f:
+            self.pfx_path = f
+            self.lbl_pfx_path.configure(text=os.path.basename(f), text_color="black")
+            
+    def toggle_signature_ui(self):
+        if self.enable_signature.get():
+            self.sign_options_frame.grid()
+        else:
+            self.sign_options_frame.grid_remove()
+
+    def toggle_sign_mode_ui(self):
+        if self.sign_mode.get() == "pfx":
+            self.pfx_frame.pack(fill="x", pady=4)
+        else:
+            self.pfx_frame.pack_forget()
+
+    def _sign_pdf(self, input_pdf, output_pdf):
+        mode = self.sign_mode.get()
+        if mode == "pfx":
+            if not PYHANKO_AVAILABLE:
+                self.log("ERROR: La librería pyhanko no está instalada.")
+                return False
+            if not self.pfx_path:
+                self.log("ERROR: No has seleccionado un archivo PFX.")
+                return False
+            password = self.entry_pfx_pass.get()
+            try:
+                signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, b"" if not password else password.encode())
+                with open(input_pdf, 'rb') as doc_b:
+                    pdf_r = PdfFileReader(doc_b)
+                    with open(output_pdf, 'wb') as doc_w:
+                        pdf_w = IncrementalPdfFileWriter(doc_w, pdf_r)
+                        signers.sign_pdf(
+                            pdf_w, signers.PdfSignatureMetadata(field_name='Signature1'),
+                            signer=signer
+                        )
+                return True
+            except Exception as e:
+                self.log(f"ERROR firmando con PFX: {e}")
+                return False
+        elif mode == "autofirma":
+            try:
+                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf", "-store", "auto"]
+                self.log("Abriendo AutoFirma (por favor revisa si pide PIN/Certificado)...")
+                result = subprocess.run(cmd, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                if result.returncode == 0:
+                    return True
+                else:
+                    self.log(f"AutoFirma cancelado o con error: {result.stderr or result.stdout}")
+                    return False
+            except FileNotFoundError:
+                self.log("ERROR: AutoFirma no está instalado o no está en el PATH.")
+                return False
+            except Exception as e:
+                self.log(f"ERROR ejecutando AutoFirma: {e}")
+                return False
+        return False
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Generación
     # ═══════════════════════════════════════════════════════════════════════════
@@ -742,6 +844,17 @@ class App(ctk.CTk):
                             final_path = out_docx
                     else:
                         final_path = out_docx
+
+                    if self.enable_signature.get() and final_path.endswith(".pdf"):
+                        self.log(f"Firmando documento {safe_name}...")
+                        signed_path = os.path.join(self.output_folder, f"{safe_name}_Firmado.pdf")
+                        success = self._sign_pdf(final_path, signed_path)
+                        if success:
+                            try: os.remove(final_path)
+                            except: pass
+                            final_path = signed_path
+                        else:
+                            self.log("Aviso: El documento se enviará sin firmar debido a un error.")
 
                     if s_mode == "none":
                         self.log(f"Fila {row_num}: OK — {os.path.basename(final_path)}")

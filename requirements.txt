@@ -3,5 +3,7 @@ pandas
 openpyxl
 docxtpl
 pywin32
-pyinstaller
+customtkinter
+pyhanko
+cryptography
 requests
