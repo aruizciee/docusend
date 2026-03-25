@@ -18,6 +18,7 @@ try:
     from pyhanko.sign import signers
     from pyhanko.pdf_utils.reader import PdfFileReader
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+    import OpenSSL
     PYHANKO_AVAILABLE = True
 except ImportError:
     PYHANKO_AVAILABLE = False
@@ -248,9 +249,8 @@ class App(ctk.CTk):
     # PASO 2 — Configuración Excel
     # ═══════════════════════════════════════════════════════════════════════════
     def _build_step2(self):
-        f = ctk.CTkFrame(self.content)
+        f = ctk.CTkScrollableFrame(self.content)
         self.step_frames.append(f)
-        f.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(f, text="Configura el nombre de los archivos",
                      font=("Segoe UI", 13, "bold")).grid(
@@ -713,10 +713,24 @@ class App(ctk.CTk):
                 return False
             password = self.entry_pfx_pass.get()
             try:
-                signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, b"" if not password else password.encode())
-                if signer.signing_key is None:
+                try:
+                    with open(self.pfx_path, 'rb') as f_pfx:
+                        p12 = OpenSSL.crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('utf-8'))
+                except Exception as ssl_err:
+                    # Intento alternativo con latin1 si utf-8 no funciona (contraseñas con caracteres especiales en Windows antiguo)
+                    with open(self.pfx_path, 'rb') as f_pfx:
+                        p12 = OpenSSL.crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('latin1'))
+
+                cert_crypto = p12.get_certificate().to_cryptography()
+                priv_key_crypto = p12.get_privatekey()
+
+                if priv_key_crypto is None:
                     self.log("ERROR: El archivo seleccionado no contiene una clave privada válida (solo el certificado público).")
                     return False
+                    
+                key_crypto = priv_key_crypto.to_cryptography_key()
+                signer = signers.SimpleSigner(signing_cert=cert_crypto, signing_key=key_crypto)
+
                 with open(input_pdf, 'rb') as doc_b:
                     pdf_r = PdfFileReader(doc_b)
                     with open(output_pdf, 'wb') as doc_w:
