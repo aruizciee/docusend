@@ -18,7 +18,7 @@ try:
     from pyhanko.sign import signers
     from pyhanko.pdf_utils.reader import PdfFileReader
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-    from OpenSSL import crypto
+    from cryptography.hazmat.primitives.serialization import pkcs12
     PYHANKO_AVAILABLE = True
 except ImportError:
     PYHANKO_AVAILABLE = False
@@ -727,48 +727,75 @@ class App(ctk.CTk):
                 return False
             password = self.entry_pfx_pass.get()
             try:
+                with open(self.pfx_path, 'rb') as f_pfx:
+                    pfx_data = f_pfx.read()
+
+                # Usar cryptography directamente para cargar PKCS12 (compatible con FNMT)
+                pwd_bytes = password.encode('utf-8') if password else None
                 try:
-                    with open(self.pfx_path, 'rb') as f_pfx:
-                        p12 = crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('utf-8'))
-                except Exception as ssl_err:
-                    # Intento alternativo con latin1 si utf-8 no funciona (contraseñas con caracteres especiales en Windows antiguo)
-                    with open(self.pfx_path, 'rb') as f_pfx:
-                        p12 = crypto.load_pkcs12(f_pfx.read(), b"" if not password else password.encode('latin1'))
+                    key_crypto, cert_crypto, chain = pkcs12.load_key_and_certificates(pfx_data, pwd_bytes)
+                except Exception:
+                    # Intento con latin1 por si la contraseña tiene caracteres especiales
+                    pwd_bytes = password.encode('latin1') if password else None
+                    key_crypto, cert_crypto, chain = pkcs12.load_key_and_certificates(pfx_data, pwd_bytes)
 
-                cert_crypto = p12.get_certificate().to_cryptography()
-                priv_key_crypto = p12.get_privatekey()
-
-                if priv_key_crypto is None:
-                    self.log("ERROR: El archivo seleccionado no contiene una clave privada válida (solo el certificado público).")
+                if key_crypto is None:
+                    self.log("ERROR: El archivo PFX no contiene una clave privada válida.")
                     return False
-                    
-                key_crypto = priv_key_crypto.to_cryptography_key()
-                signer = signers.SimpleSigner(signing_cert=cert_crypto, signing_key=key_crypto)
+                if cert_crypto is None:
+                    self.log("ERROR: El archivo PFX no contiene un certificado válido.")
+                    return False
+
+                other_certs = list(chain) if chain else []
+                signer = signers.SimpleSigner(
+                    signing_cert=cert_crypto,
+                    signing_key=key_crypto,
+                    cert_registry=None,
+                    other_certs=other_certs
+                )
 
                 with open(input_pdf, 'rb') as doc_b:
-                    pdf_r = PdfFileReader(doc_b)
-                    with open(output_pdf, 'wb') as doc_w:
-                        pdf_w = IncrementalPdfFileWriter(doc_w, pdf_r)
-                        signers.sign_pdf(
-                            pdf_w, signers.PdfSignatureMetadata(field_name='Signature1'),
-                            signer=signer
-                        )
+                    pdf_w = IncrementalPdfFileWriter(doc_b)
+                    signers.sign_pdf(
+                        pdf_w, signers.PdfSignatureMetadata(field_name='Signature1'),
+                        signer=signer,
+                        output=open(output_pdf, 'wb')
+                    )
                 return True
             except Exception as e:
                 self.log(f"ERROR firmando con PFX: {e}")
                 return False
         elif mode == "autofirma":
             try:
-                cmd = ["AutoFirma", "commandline", "-i", os.path.abspath(input_pdf), "-o", os.path.abspath(output_pdf), "-format", "pdf", "-certgui"]
-                self.log("Abriendo AutoFirma (por favor revisa si pide PIN/Certificado en una ventana nueva)...")
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0:
+                # Buscar AutofirmaCommandLine.exe en Program Files
+                af_cmd = r'C:\Program Files\Autofirma\Autofirma\AutofirmaCommandLine.exe'
+                if not os.path.isfile(af_cmd):
+                    # Fallback: intentar desde PATH
+                    af_cmd = 'AutofirmaCommandLine'
+                cmd = [
+                    af_cmd, "sign",
+                    "-i", os.path.abspath(input_pdf),
+                    "-o", os.path.abspath(output_pdf),
+                    "-format", "pades",
+                    "-certgui"
+                ]
+                self.log("Abriendo AutoFirma (selecciona tu certificado en la ventana que aparece)...")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode == 0 and os.path.isfile(output_pdf):
                     return True
                 else:
-                    self.log(f"AutoFirma cancelado o con error: {result.stderr or result.stdout}")
+                    # Filtrar las advertencias de Java Preferences y mostrar solo el error real
+                    err_lines = [l for l in (result.stderr or result.stdout or "").splitlines()
+                                 if "WindowsPreferences" not in l and "ADVERTENCIA" not in l
+                                 and "prefs root node" not in l and l.strip()]
+                    err_msg = "\n".join(err_lines[-5:]) if err_lines else "Sin detalle de error"
+                    self.log(f"AutoFirma error: {err_msg}")
                     return False
+            except subprocess.TimeoutExpired:
+                self.log("ERROR: AutoFirma excedió el tiempo de espera (2 min).")
+                return False
             except FileNotFoundError:
-                self.log("ERROR: AutoFirma no está instalado o no está en el PATH.")
+                self.log("ERROR: No se encontró AutofirmaCommandLine.exe. Verifica que AutoFirma esté instalado.")
                 return False
             except Exception as e:
                 self.log(f"ERROR ejecutando AutoFirma: {e}")
