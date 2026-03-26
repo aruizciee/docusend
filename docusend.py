@@ -735,7 +735,7 @@ class App(ctk.CTk):
                     signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd_bytes)
 
                 with open(input_pdf, 'rb') as doc_b:
-                    pdf_w = IncrementalPdfFileWriter(doc_b)
+                    pdf_w = IncrementalPdfFileWriter(doc_b, strict=False)
                     signers.sign_pdf(
                         pdf_w, signers.PdfSignatureMetadata(field_name='Signature1'),
                         signer=signer,
