@@ -18,7 +18,6 @@ try:
     from pyhanko.sign import signers
     from pyhanko.pdf_utils.reader import PdfFileReader
     from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-    from cryptography.hazmat.primitives.serialization import pkcs12
     PYHANKO_AVAILABLE = True
 except ImportError:
     PYHANKO_AVAILABLE = False
@@ -727,32 +726,13 @@ class App(ctk.CTk):
                 return False
             password = self.entry_pfx_pass.get()
             try:
-                with open(self.pfx_path, 'rb') as f_pfx:
-                    pfx_data = f_pfx.read()
-
-                # Usar cryptography directamente para cargar PKCS12 (compatible con FNMT)
+                # Usar el cargador nativo de pyhanko (usa cryptography internamente)
                 pwd_bytes = password.encode('utf-8') if password else None
                 try:
-                    key_crypto, cert_crypto, chain = pkcs12.load_key_and_certificates(pfx_data, pwd_bytes)
+                    signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd_bytes)
                 except Exception:
-                    # Intento con latin1 por si la contraseña tiene caracteres especiales
                     pwd_bytes = password.encode('latin1') if password else None
-                    key_crypto, cert_crypto, chain = pkcs12.load_key_and_certificates(pfx_data, pwd_bytes)
-
-                if key_crypto is None:
-                    self.log("ERROR: El archivo PFX no contiene una clave privada válida.")
-                    return False
-                if cert_crypto is None:
-                    self.log("ERROR: El archivo PFX no contiene un certificado válido.")
-                    return False
-
-                other_certs = list(chain) if chain else []
-                signer = signers.SimpleSigner(
-                    signing_cert=cert_crypto,
-                    signing_key=key_crypto,
-                    cert_registry=None,
-                    other_certs=other_certs
-                )
+                    signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd_bytes)
 
                 with open(input_pdf, 'rb') as doc_b:
                     pdf_w = IncrementalPdfFileWriter(doc_b)
