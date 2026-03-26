@@ -473,16 +473,18 @@ class App(ctk.CTk):
                                       command=self._stop_generation, state="disabled")
         self.btn_stop.grid(row=1, column=1, sticky="e", pady=(2, 0))
 
+        # Log
+        self.log_box = ctk.CTkTextbox(f, state="disabled")
+        self.log_box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 16))
+        f.grid_rowconfigure(3, weight=1)
+
     def _stop_generation(self):
         if self.is_running:
             self.is_running = False
             self.log("Solicitando detención del proceso... (se detendrá tras el contrato actual)")
             self.btn_stop.configure(state="disabled")
 
-        # Log
-        self.log_box = ctk.CTkTextbox(f, state="disabled")
-        self.log_box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 16))
-        f.grid_rowconfigure(3, weight=1)
+
 
 
     # ═══════════════════════════════════════════════════════════════════════════
