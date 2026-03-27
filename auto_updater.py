@@ -130,7 +130,7 @@ def _download_and_restart(app, asset_url):
         bat_content = (
             f"@echo off\n"
             f":wait\n"
-            f'tasklist /fi "PID eq {pid}" 2>nul | find /i "generador_contratos.exe" >nul\n'
+            f'tasklist /fi "PID eq {pid}" 2>nul | find /i "{pid}" >nul\n'
             f"if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\n"
             f"timeout /t 2 /nobreak >nul\n"
             f'move /y "{new_exe}" "{install_exe}"\n'
