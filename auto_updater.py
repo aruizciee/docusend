@@ -1,8 +1,8 @@
 """
-Auto-updater para GeneradorContratos.
+Auto-updater para DocuSend.
 Comprueba la última release en GitHub y, si hay versión nueva,
 pregunta al usuario si desea actualizar. La descarga e instala en
-%LOCALAPPDATA%\GeneradorContratos\ (carpeta local, fuera de OneDrive)
+%LOCALAPPDATA%\DocuSend\ (carpeta local, fuera de OneDrive)
 para evitar interferencias con la sincronización al cargar DLLs.
 """
 import os
@@ -17,7 +17,7 @@ try:
 except ImportError:
     VERSION = "v0.0.0-dev"
 
-GITHUB_REPO  = "aruizciee/GeneradorContratos"
+GITHUB_REPO  = "aruizciee/docusend"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 EXE_NAME     = "docusend.exe"
 
@@ -27,9 +27,9 @@ EXE_NAME     = "docusend.exe"
 # ---------------------------------------------------------------------------
 
 def _get_install_dir():
-    """Devuelve %LOCALAPPDATA%\GeneradorContratos, creándolo si no existe."""
+    """Devuelve %LOCALAPPDATA%\DocuSend, creándolo si no existe."""
     local_appdata = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-    d = os.path.join(local_appdata, "GeneradorContratos")
+    d = os.path.join(local_appdata, "DocuSend")
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -100,7 +100,7 @@ def _prompt_update(app, latest, asset_url):
 
 def _download_and_restart(app, asset_url):
     """
-    Descarga el nuevo .exe en %LOCALAPPDATA%\\GeneradorContratos\\ y lanza
+    Descarga el nuevo .exe en %LOCALAPPDATA%\\DocuSend\\ y lanza
     un script batch que lo activa. Usar esta carpeta local (no OneDrive)
     evita que la sincronización en tiempo real bloquee la carga de DLLs.
     """
