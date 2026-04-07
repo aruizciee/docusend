@@ -26,21 +26,26 @@ jobs:
 
       - name: Convertir SVG a ICO
         run: |
-          pip install cairosvg pillow
+          pip install svglib reportlab pillow
           $script = @'
-          import cairosvg, io
+          from svglib.svglib import svg2rlg
+          from reportlab.graphics import renderPM
           from PIL import Image
+          import io
 
-          svg_path = "assets/icon.svg"
-          ico_path = "assets/icon.ico"
           sizes = [16, 32, 48, 64, 128, 256]
           imgs = []
           for s in sizes:
-              png = cairosvg.svg2png(url=svg_path, output_width=s, output_height=s)
+              drawing = svg2rlg("assets/icon.svg")
+              scale = s / max(drawing.width, drawing.height)
+              drawing.width = s
+              drawing.height = s
+              drawing.transform = f"scale({scale},{scale})"
+              png = renderPM.drawToString(drawing, fmt="PNG")
               imgs.append(Image.open(io.BytesIO(png)).convert("RGBA"))
-          imgs[0].save(ico_path, format="ICO", sizes=[(s, s) for s in sizes],
-                       append_images=imgs[1:])
-          print(f"ICO generado: {ico_path}")
+          imgs[0].save("assets/icon.ico", format="ICO",
+                       sizes=[(s, s) for s in sizes], append_images=imgs[1:])
+          print("ICO generado correctamente")
           '@
           $script | Out-File -FilePath svg_to_ico.py -Encoding utf8
           python svg_to_ico.py
