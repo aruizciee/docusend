@@ -90,7 +90,7 @@ python docusend.py
 To compile:
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "." docusend.py
+pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico docusend.py
 ```
 
 ---
@@ -181,5 +181,5 @@ python docusend.py
 Para compilar:
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "." docusend.py
+pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico docusend.py
 ```

@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout código
+      - name: Checkout codigo
         uses: actions/checkout@v4
 
       - name: Configurar Python
@@ -24,21 +24,40 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
-      - name: Generar tag de versión
+      - name: Convertir SVG a ICO
+        run: |
+          pip install cairosvg pillow
+          python - <<'EOF'
+          import cairosvg, io
+          from PIL import Image
+
+          svg_path = "assets/icon.svg"
+          ico_path = "assets/icon.ico"
+          sizes = [16, 32, 48, 64, 128, 256]
+          imgs = []
+          for s in sizes:
+              png = cairosvg.svg2png(url=svg_path, output_width=s, output_height=s)
+              imgs.append(Image.open(io.BytesIO(png)).convert("RGBA"))
+          imgs[0].save(ico_path, format="ICO", sizes=[(s, s) for s in sizes],
+                       append_images=imgs[1:])
+          print(f"ICO generado: {ico_path}")
+          EOF
+
+      - name: Generar tag de version
         id: version
         run: |
           $date = Get-Date -Format "yyyy.MM.dd"
           $run  = "${{ github.run_number }}"
           $tag  = "v$date-$run"
           echo "TAG=$tag" >> $env:GITHUB_OUTPUT
-          # Inyectar versión en version.py con UTF-8 sin BOM para que Python lo lea bien
           [System.IO.File]::WriteAllText("version.py", "VERSION = `"$tag`"`n", [System.Text.UTF8Encoding]::new($false))
 
       - name: Compilar ejecutable
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --collect-all customtkinter `
-            --runtime-tmpdir "." `
+            --runtime-tmpdir "%TEMP%" `
+            --icon assets/icon.ico `
             docusend.py
 
       - name: Crear Release y subir .exe
@@ -47,7 +66,7 @@ jobs:
           tag_name: ${{ steps.version.outputs.TAG }}
           name: "Release ${{ steps.version.outputs.TAG }}"
           body: |
-            Release automática generada al hacer push a `main`.
+            Release automatica generada al hacer push a `main`.
 
             **Commit:** ${{ github.sha }}
             **Mensaje:** ${{ github.event.head_commit.message }}

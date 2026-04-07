@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="docFill" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#cceeff"/>
+    </linearGradient>
+    <linearGradient id="arrowGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%"   style="stop-color:#0c3d6e"/>
+      <stop offset="45%"  style="stop-color:#0d86c8"/>
+      <stop offset="100%" style="stop-color:#2adfc8"/>
+    </linearGradient>
+    <linearGradient id="foldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   style="stop-color:#b8dff5"/>
+      <stop offset="100%" style="stop-color:#5aaedb"/>
+    </linearGradient>
+    <filter id="docShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#0a4f8c" flood-opacity="0.20"/>
+    </filter>
+    <filter id="arrowShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#0a3f7c" flood-opacity="0.30"/>
+    </filter>
+    <clipPath id="arrowClip">
+      <path d="M0,0 L100,0 L100,100 L0,100 Z M25,14 L63,14 L63,29 L77,29 L77,86 Q77,90 73,90 L27,90 Q23,90 23,86 Z" fill-rule="evenodd"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#arrowShadow)">
+    <path d="M 32,80 C 10,82 4,62 12,48 C 18,38 28,33 40,33 L 55,33"
+          fill="none" stroke="url(#arrowGrad)" stroke-width="13" stroke-linecap="round"
+          clip-path="url(#arrowClip)"/>
+    <polygon points="80,18  52,28  56,50" fill="url(#arrowGrad)"/>
+    <path d="M 55,33 L 66,24" fill="none" stroke="url(#arrowGrad)" stroke-width="13" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#docShadow)">
+    <path d="M25,14 L63,14 L63,29 L77,29 L77,86 Q77,90 73,90 L27,90 Q23,90 23,86 L23,18 Q23,14 25,14 Z"
+          fill="url(#docFill)" stroke="#0d7abf" stroke-width="3.2" stroke-linejoin="round"/>
+    <path d="M63,14 L63,29 L77,29 Z"
+          fill="url(#foldGrad)" stroke="#0d7abf" stroke-width="3.2" stroke-linejoin="round"/>
+  </g>
+</svg>
