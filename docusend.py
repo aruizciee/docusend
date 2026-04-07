@@ -14,6 +14,13 @@ from io import BytesIO
 import sys
 from auto_updater import check_for_updates
 from version import VERSION
+import ctypes
+
+try:
+    myappid = f"ciee.docusend.app.{VERSION}"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except Exception:
+    pass
 
 try:
     from pyhanko.sign import signers
