@@ -81,8 +81,8 @@ Please find your contract for the position starting on {{StartDate}}.
 ### Building from Source
 
 ```bash
-git clone https://github.com/aruizciee/GeneradorContratos.git
-cd GeneradorContratos
+git clone https://github.com/aruizciee/docusend.git
+cd docusend
 pip install -r requirements.txt
 python docusend.py
 ```
@@ -90,7 +90,7 @@ python docusend.py
 To compile:
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "." docusend.py
+pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico docusend.py
 ```
 
 ---
@@ -172,8 +172,8 @@ Adjunto encontrarás tu contrato para el puesto con inicio el {{FechaInicio}}.
 ### Compilar desde el código fuente
 
 ```bash
-git clone https://github.com/aruizciee/GeneradorContratos.git
-cd GeneradorContratos
+git clone https://github.com/aruizciee/docusend.git
+cd docusend
 pip install -r requirements.txt
 python docusend.py
 ```
@@ -181,5 +181,5 @@ python docusend.py
 Para compilar:
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "." docusend.py
+pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico docusend.py
 ```
