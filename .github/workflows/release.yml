@@ -27,7 +27,7 @@ jobs:
       - name: Convertir SVG a ICO
         run: |
           pip install cairosvg pillow
-          python - <<'EOF'
+          $script = @'
           import cairosvg, io
           from PIL import Image
 
@@ -41,7 +41,9 @@ jobs:
           imgs[0].save(ico_path, format="ICO", sizes=[(s, s) for s in sizes],
                        append_images=imgs[1:])
           print(f"ICO generado: {ico_path}")
-          EOF
+          '@
+          $script | Out-File -FilePath svg_to_ico.py -Encoding utf8
+          python svg_to_ico.py
 
       - name: Generar tag de version
         id: version
