@@ -4,7 +4,7 @@ if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 
 echo Construyendo el ejecutable...
-pyinstaller --noconfirm --onefile --windowed --add-data "C:\Users\ARuiz\AppData\Local\Programs\Python\Python313\Lib\site-packages\customtkinter;customtkinter/" "docusend.py"
+pyinstaller --noconfirm --onefile --windowed --icon="assets\icon.ico" --add-data "assets;assets/" --add-data "C:\Users\ARuiz\AppData\Local\Programs\Python\Python313\Lib\site-packages\customtkinter;customtkinter/" "docusend.py"
 
 echo.
 echo Movimiendo el ejecutable a la carpeta principal...

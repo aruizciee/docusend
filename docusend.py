@@ -11,6 +11,7 @@ from datetime import datetime
 import threading
 import subprocess
 from io import BytesIO
+import sys
 from auto_updater import check_for_updates
 from version import VERSION
 
@@ -52,9 +53,17 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("DocuSend")
-        _ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
+        
+        try:
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+            
+        _ico = os.path.join(base_path, "assets", "icon.ico")
         if os.path.exists(_ico):
             self.wm_iconbitmap(_ico)
+            self.iconbitmap(_ico)
+            
         self.geometry("700x620")
 
         self.resizable(False, False)
