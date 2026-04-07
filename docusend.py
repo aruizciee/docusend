@@ -52,7 +52,11 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("DocuSend")
+        _ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.ico")
+        if os.path.exists(_ico):
+            self.wm_iconbitmap(_ico)
         self.geometry("700x620")
+
         self.resizable(False, False)
 
         self.after(3000, lambda: check_for_updates(self))
