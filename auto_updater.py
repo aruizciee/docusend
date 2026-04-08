@@ -87,17 +87,17 @@ def _prompt_update(app, latest, asset_url):
 
 def _download_and_restart(app, asset_url):
     """
-    Descarga el nuevo .exe en %LOCALAPPDATA%\\DocuSend\\ y lanza
-    un script batch que lo activa.
+    Descarga el nuevo .exe en un directorio temporal y lanza
+    un script batch que reemplaza el ejecutable original y lo reinicia.
     """
     if not getattr(sys, "frozen", False):
         messagebox.showinfo("Dev mode", "Auto-update desactivado en modo desarrollo.")
         return
 
-    install_dir = _get_install_dir()
-    install_exe = os.path.join(install_dir, EXE_NAME)
-    new_exe     = install_exe + ".new"
-    bat_path    = os.path.join(install_dir, "_updater.bat")
+    original_exe = sys.executable
+    temp_dir = _get_install_dir()
+    new_exe  = os.path.join(temp_dir, EXE_NAME + ".new")
+    bat_path = os.path.join(temp_dir, "_updater.bat")
 
     try:
         app.after(0, lambda: _show_downloading(app))
@@ -111,13 +111,28 @@ def _download_and_restart(app, asset_url):
         pid = os.getpid()
         bat_content = (
             f"@echo off\n"
-            f":wait\n"
+            f"setlocal enabledelayedexpansion\n"
+            f":wait_process\n"
             f'tasklist /fi "PID eq {pid}" 2>nul | find /i "{pid}" >nul\n'
-            f"if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)\n"
+            f"if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait_process)\n"
             f"timeout /t 2 /nobreak >nul\n"
-            f'move /y "{new_exe}" "{install_exe}"\n'
-            f"timeout /t 1 /nobreak >nul\n"
-            f'start "" "{install_exe}"\n'
+            f"set MAX_RETRIES=15\n"
+            f"set RETRY_COUNT=0\n"
+            f":retry_update\n"
+            f'del /f /q "{original_exe}" >nul 2>&1\n'
+            f'move /y "{new_exe}" "{original_exe}" >nul 2>&1\n'
+            f'if exist "{new_exe}" (\n'
+            f"    set /a RETRY_COUNT+=1\n"
+            f"    if !RETRY_COUNT! geq !MAX_RETRIES! goto on_error\n"
+            f"    timeout /t 2 /nobreak >nul\n"
+            f"    goto retry_update\n"
+            f")\n"
+            f'start "" "{original_exe}"\n'
+            f"goto end\n"
+            f":on_error\n"
+            f'mshta vbscript:Execute("msgbox ""Error: El archivo original de la app esta bloqueado (posiblemente por OneDrive o un antivirus). Intentalo de nuevo mas tarde."",16,""Error de actualizacion"":close")\n'
+            f'start "" "{original_exe}"\n'
+            f":end\n"
             f'del "%~f0"\n'
         )
         with open(bat_path, "w") as f:
