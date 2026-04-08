@@ -68,9 +68,21 @@ class App(ctk.CTk):
             
         _ico = os.path.join(base_path, "assets", "icon.ico")
         if os.path.exists(_ico):
-            self.wm_iconbitmap(_ico)
-            self.iconbitmap(_ico)
+            # Intento normal
+            try:
+                self.iconbitmap(_ico)
+            except Exception:
+                pass
             
+            # Intento forzado a traves de Pillow (corrige el icono en la barra de tareas en CustomTkinter)
+            try:
+                from PIL import Image, ImageTk
+                img = ImageTk.PhotoImage(Image.open(_ico))
+                self.wm_iconphoto(True, img)
+                self.iconphoto(True, img)
+            except Exception:
+                pass
+                
         self.geometry("700x620")
 
         self.resizable(False, False)
