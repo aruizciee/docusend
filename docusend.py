@@ -96,6 +96,7 @@ class App(ctk.CTk):
         self.output_folder        = ""
         self.excel_columns        = []
         self.outlook_accounts     = []
+        self.extra_attachments    = []
         self.current_step         = 0
 
         # --- Layout raíz ---
@@ -145,14 +146,21 @@ class App(ctk.CTk):
                                       command=self._next_step)
         self.btn_next.grid(row=0, column=2, padx=(8, 0))
 
-        # Versión + actualización (pie derecho)
+        # Versión + actualización + configuración (pie derecho)
         foot = ctk.CTkFrame(self, fg_color="transparent")
         foot.grid(row=3, column=0, sticky="ew", padx=24, pady=(0, 8))
-        foot.grid_columnconfigure(0, weight=1)
+        foot.grid_columnconfigure(1, weight=1)
+        
+        self.combo_theme = ctk.CTkOptionMenu(foot, values=["Sistema", "Claro", "Oscuro"],
+                                             command=self._change_appearance_mode,
+                                             width=80, height=24, font=("Segoe UI", 11), fg_color=("gray75", "gray30"), text_color=("black", "white"))
+        self.combo_theme.grid(row=0, column=0, sticky="w")
+        self.combo_theme.set("Sistema")
+
         ctk.CTkButton(foot, text="Buscar actualizaciones", width=160, height=24,
                       font=("Segoe UI", 11), fg_color="transparent", border_width=1,
                       text_color=("gray40", "gray60"),
-                      command=lambda: check_for_updates(self)).grid(row=0, column=1, sticky="e")
+                      command=lambda: check_for_updates(self)).grid(row=0, column=2, sticky="e")
 
         self._restore_config()
         self._show_step(0)
@@ -275,6 +283,46 @@ class App(ctk.CTk):
             setattr(self, attr, lbl)
             ctk.CTkButton(f, text="Seleccionar", width=110, command=cmd).grid(
                 row=i*2, column=2, padx=(0, 16), pady=(0, 4))
+
+        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+            row=7, column=0, columnspan=3, sticky="ew", padx=16, pady=(12, 8))
+            
+        ctk.CTkLabel(f, text="📎 Adjuntos estáticos adicionales", font=("Segoe UI", 12)).grid(
+            row=8, column=0, columnspan=3, padx=16, pady=(0, 2), sticky="w")
+            
+        self.lbl_extra_att = ctk.CTkLabel(f, text="Ningún archivo seleccionado", text_color=("gray60", "gray50"),
+                                          font=("Segoe UI", 11), anchor="w", justify="left")
+        self.lbl_extra_att.grid(row=9, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="w")
+        
+        btn_frame = ctk.CTkFrame(f, fg_color="transparent")
+        btn_frame.grid(row=9, column=2, padx=(0, 16), pady=(0, 4), sticky="e")
+        ctk.CTkButton(btn_frame, text="Añadir", width=55, command=self.add_extra_attachments).pack(side="left", padx=2)
+        ctk.CTkButton(btn_frame, text="Borrar", width=55, fg_color="gray50", command=self.clear_extra_attachments).pack(side="left")
+
+    def _change_appearance_mode(self, new_mode: str):
+        if new_mode == "Sistema":
+            ctk.set_appearance_mode("System")
+        elif new_mode == "Claro":
+            ctk.set_appearance_mode("Light")
+        else:
+            ctk.set_appearance_mode("Dark")
+        self._save_config()
+
+    def clear_extra_attachments(self):
+        self.extra_attachments = []
+        self.lbl_extra_att.configure(text="Ningún archivo seleccionado", text_color=("gray60", "gray50"))
+        self._save_config()
+
+    def add_extra_attachments(self):
+        files = filedialog.askopenfilenames(title="Seleccionar adjuntos estáticos")
+        if files:
+            self.extra_attachments.extend(files)
+            count = len(self.extra_attachments)
+            names = [os.path.basename(f) for f in self.extra_attachments]
+            text_disp = f"{count} archivo(s): " + ", ".join(names)
+            if len(text_disp) > 55: text_disp = text_disp[:52] + "..."
+            self.lbl_extra_att.configure(text=text_disp, text_color=("black", "white"))
+            self._save_config()
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PASO 2 — Configuración Excel
@@ -649,6 +697,17 @@ class App(ctk.CTk):
             self.output_format.set(cfg["output_format"])
         if cfg.get("send_mode"):
             self.send_mode.set(cfg["send_mode"])
+        if cfg.get("appearance_mode"):
+            self.combo_theme.set(cfg["appearance_mode"])
+            self._change_appearance_mode(cfg["appearance_mode"])
+        if cfg.get("extra_attachments"):
+            self.extra_attachments = cfg["extra_attachments"]
+            if self.extra_attachments:
+                count = len(self.extra_attachments)
+                names = [os.path.basename(f) for f in self.extra_attachments]
+                text_disp = f"{count} archivo(s): " + ", ".join(names)
+                if len(text_disp) > 55: text_disp = text_disp[:52] + "..."
+                self.lbl_extra_att.configure(text=text_disp, text_color=("black", "white"))
 
     def _save_config(self):
         save_config({
@@ -666,6 +725,8 @@ class App(ctk.CTk):
             "email_mode":            self.email_mode.get(),
             "output_format":         self.output_format.get(),
             "send_mode":             self.send_mode.get(),
+            "appearance_mode":       self.combo_theme.get(),
+            "extra_attachments":     getattr(self, "extra_attachments", []),
         })
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -969,6 +1030,10 @@ class App(ctk.CTk):
                     if send_account:
                         mail.SendUsingAccount = send_account
                     mail.Attachments.Add(os.path.abspath(final_path))
+                    
+                    for att in getattr(self, "extra_attachments", []):
+                        if os.path.isfile(att):
+                            mail.Attachments.Add(os.path.abspath(att))
 
                     if s_mode == "send":
                         mail.Send()
