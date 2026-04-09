@@ -21,8 +21,10 @@ A Windows desktop application that automates the generation of Word/PDF document
   - Select which Outlook account to send from (supports multiple accounts)
   - Use `{{ColumnName}}` in subject and body to personalise each email
   - Optionally use an Outlook `.oft` template instead of writing subject/body manually
+- **Static email attachments** — attach one or more fixed files (e.g. terms & conditions, brochures) to every outgoing email, on top of the generated document
 - **"Generate only" mode** — produce all documents without sending any emails
-- **Auto-updater** — checks for new releases on GitHub at startup; downloads and installs automatically
+- **Appearance mode** — switch between System, Light, and Dark themes from the footer; preference is saved between sessions
+- **Auto-updater** — checks for new releases on GitHub at startup; downloads and replaces the executable automatically
 - **Persistent settings** — remembers all your configuration between sessions
 
 ### Requirements
@@ -37,7 +39,7 @@ No Python installation required — just download the `.exe` from [Releases](../
 ### Quick Start
 
 1. **Download** `docusend.exe` from the latest [Release](../../releases/latest) and run it from a **local folder** (not OneDrive or a network drive — see note below).
-2. **Step 1 — Files**: select your Word template (`.docx`), your Excel data file (`.xlsx`), and the output folder.
+2. **Step 1 — Files**: select your Word template (`.docx`), your Excel data file (`.xlsx`), and the output folder. Optionally add static attachments that will be included in every email.
 3. **Step 2 — Configuration**: set the file naming pattern using `{{ColumnName}}` placeholders. Optionally enable digital signing.
 4. **Step 3 — Email**: configure subject, body, recipients, Outlook account, output format, and send mode. Set to *"Solo generar archivos"* if you don't want to send emails.
 5. **Step 4 — Generate**: click **✓ Generar** and watch the progress log.
@@ -87,10 +89,10 @@ pip install -r requirements.txt
 python docusend.py
 ```
 
-To compile:
+To compile (or just run `build.bat`):
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico docusend.py
+pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico --name DocuSend_App docusend.py
 ```
 
 ---
@@ -112,8 +114,10 @@ Una aplicación de escritorio para Windows que automatiza la generación de docu
   - Selecciona la cuenta de Outlook desde la que enviar (compatible con múltiples cuentas)
   - Usa `{{NombreColumna}}` en asunto y cuerpo para personalizar cada correo
   - Opcionalmente usa una plantilla Outlook `.oft` en lugar de escribir asunto/cuerpo
+- **Adjuntos estáticos adicionales** — adjunta uno o varios archivos fijos (p. ej. condiciones generales, folletos) a todos los correos, además del documento generado
 - **Modo "Solo generar"** — genera todos los documentos sin enviar ningún correo
-- **Actualizador automático** — comprueba nuevas versiones en GitHub al arrancar; descarga e instala automáticamente
+- **Modo de apariencia** — cambia entre los temas Sistema, Claro y Oscuro desde el pie de la ventana; la preferencia se guarda entre sesiones
+- **Actualizador automático** — comprueba nuevas versiones en GitHub al arrancar; descarga y sustituye el ejecutable automáticamente
 - **Configuración persistente** — recuerda todos los ajustes entre sesiones
 
 ### Requisitos
@@ -128,7 +132,7 @@ No necesitas instalar Python — descarga el `.exe` desde [Releases](../../relea
 ### Inicio rápido
 
 1. **Descarga** `docusend.exe` desde la última [Release](../../releases/latest) y ejecútalo desde una **carpeta local** (no OneDrive ni unidad de red — ver nota abajo).
-2. **Paso 1 — Archivos**: selecciona tu plantilla Word (`.docx`), el archivo de datos Excel (`.xlsx`) y la carpeta de salida.
+2. **Paso 1 — Archivos**: selecciona tu plantilla Word (`.docx`), el archivo de datos Excel (`.xlsx`) y la carpeta de salida. Opcionalmente añade adjuntos estáticos que se incluirán en todos los correos.
 3. **Paso 2 — Configuración**: define el patrón de nombre de archivo usando `{{NombreColumna}}`. Opcionalmente activa la firma digital.
 4. **Paso 3 — Correo**: configura asunto, cuerpo, destinatarios, cuenta de Outlook, formato de salida y modo de envío. Elige *"Solo generar archivos"* si no quieres enviar correos.
 5. **Paso 4 — Generar**: pulsa **✓ Generar** y observa el log de progreso.
@@ -178,8 +182,8 @@ pip install -r requirements.txt
 python docusend.py
 ```
 
-Para compilar:
+Para compilar (o simplemente ejecuta `build.bat`):
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico docusend.py
+pyinstaller --noconfirm --onefile --windowed --collect-all customtkinter --runtime-tmpdir "%TEMP%" --icon assets/icon.ico --name DocuSend_App docusend.py
 ```
