@@ -46,12 +46,42 @@ def save_config(data):
     except Exception:
         pass
 
-def substitute_variables(text, context):
+def substitute_variables(text, context, escape_html=False):
     for k, v in context.items():
-        text = text.replace("{{" + k + "}}", str(v))
+        val = html.escape(str(v)) if escape_html else str(v)
+        text = text.replace("{{" + k + "}}", val)
     return text
 
-ctk.set_appearance_mode("Segoe UI")
+def format_cell(value):
+    """Convierte un valor de Excel en texto legible para plantillas y correos."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (pd.Timestamp, datetime)):
+        if (value.hour, value.minute, value.second) == (0, 0, 0):
+            return value.strftime("%d/%m/%Y")
+        return value.strftime("%d/%m/%Y %H:%M")
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+def unique_base_path(folder, base_name, extensions):
+    """Devuelve una ruta base (sin extensión) que no colisione con archivos
+    existentes ni con nombres ya usados en este lote."""
+    candidate = base_name
+    n = 2
+    while any(os.path.exists(os.path.join(folder, candidate + ext)) for ext in extensions):
+        candidate = f"{base_name}_{n}"
+        n += 1
+    return os.path.join(folder, candidate)
+
+ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
 STEPS = ["Archivos", "Configuración", "Correo", "Generar"]
@@ -733,8 +763,16 @@ class App(ctk.CTk):
     # Log
     # ═══════════════════════════════════════════════════════════════════════════
     def log(self, text):
+        line = f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n"
+        if threading.current_thread() is threading.main_thread():
+            self._append_log(line)
+        else:
+            # Tkinter no es thread-safe: delegar en el hilo principal
+            self.after(0, self._append_log, line)
+
+    def _append_log(self, line):
         self.log_box.configure(state="normal")
-        self.log_box.insert("end", f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
+        self.log_box.insert("end", line)
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
@@ -810,7 +848,7 @@ class App(ctk.CTk):
             self.pfx_frame.pack_forget()
 
     def _sign_pdf(self, input_pdf, output_pdf):
-        mode = self.sign_mode.get()
+        mode = self._run["sign_mode"]
         if mode == "pfx":
             if not PYHANKO_AVAILABLE:
                 self.log("ERROR: La librería pyhanko no está instalada.")
@@ -818,7 +856,7 @@ class App(ctk.CTk):
             if not self.pfx_path:
                 self.log("ERROR: No has seleccionado un archivo PFX.")
                 return False
-            password = self.entry_pfx_pass.get()
+            password = self._run["pfx_pass"]
             try:
                 # Usar el cargador nativo de pyhanko (usa cryptography internamente)
                 pwd_bytes = password.encode('utf-8') if password else None
@@ -828,12 +866,12 @@ class App(ctk.CTk):
                     pwd_bytes = password.encode('latin1') if password else None
                     signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd_bytes)
 
-                with open(input_pdf, 'rb') as doc_b:
+                with open(input_pdf, 'rb') as doc_b, open(output_pdf, 'wb') as out_f:
                     pdf_w = IncrementalPdfFileWriter(doc_b, strict=False)
                     signers.sign_pdf(
                         pdf_w, signers.PdfSignatureMetadata(field_name='Signature1'),
                         signer=signer,
-                        output=open(output_pdf, 'wb')
+                        output=out_f
                     )
                 return True
             except Exception as e:
@@ -887,6 +925,25 @@ class App(ctk.CTk):
                 return
 
         self._save_config()
+        # Leer todos los valores de la interfaz aquí (hilo principal):
+        # el hilo de trabajo no debe tocar widgets de Tkinter.
+        self._run = {
+            "email_col":        self.entry_email_col.get().strip(),
+            "email_mode":       self.email_mode.get(),
+            "send_mode":        self.send_mode.get(),
+            "output_format":    self.output_format.get(),
+            "account_label":    self.combo_account.get(),
+            "filename_pattern": self.entry_filename_pattern.get().strip(),
+            "subject":          self.entry_subject.get(),
+            "body":             self.txt_body.get("1.0", "end-1c"),
+            "to_extra":         self.entry_to_extra.get().strip(),
+            "cc":               self.entry_cc.get().strip(),
+            "bcc":              self.entry_bcc.get().strip(),
+            "sign":             bool(self.enable_signature.get()),
+            "sign_mode":        self.sign_mode.get(),
+            "pfx_pass":         self.entry_pfx_pass.get(),
+            "extra_attachments": list(getattr(self, "extra_attachments", [])),
+        }
         self._show_step(3)
         self.progress_bar.set(0)
         self.lbl_progress.configure(text="")
@@ -898,15 +955,28 @@ class App(ctk.CTk):
         threading.Thread(target=self.process_data, daemon=True).start()
 
     def process_data(self):
+        word_app = None
+        com_initialized = False
+        cfg = self._run
         try:
-            email_col = self.entry_email_col.get().strip()
-            mode      = self.email_mode.get()
-            s_mode    = self.send_mode.get()
+            # COM debe inicializarse en este hilo siempre (Word y/o Outlook)
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+                com_initialized = True
+            except Exception as e:
+                self.log(f"Aviso: no se pudo inicializar COM: {e}")
+
+            email_col = cfg["email_col"]
+            mode      = cfg["email_mode"]
+            s_mode    = cfg["send_mode"]
 
             self.log("Leyendo Excel...")
-            df = pd.read_excel(self.excel_data_path)
+            # dtype=object evita que pandas convierta enteros en float (123.0)
+            df = pd.read_excel(self.excel_data_path, dtype=object)
+            df.columns = [str(c) for c in df.columns]
 
-            if email_col not in df.columns:
+            if s_mode != "none" and email_col not in df.columns:
                 self.log(f"ERROR: Columna '{email_col}' no encontrada.")
                 self.log(f"Columnas disponibles: {', '.join(df.columns)}")
                 return
@@ -915,10 +985,8 @@ class App(ctk.CTk):
             send_account = None
             if s_mode != "none":
                 try:
-                    import pythoncom
-                    pythoncom.CoInitialize()
                     outlook = win32.Dispatch("Outlook.Application")
-                    selected_label = self.combo_account.get()
+                    selected_label = cfg["account_label"]
                     for name, smtp in self.outlook_accounts:
                         if selected_label.startswith(name):
                             accounts = outlook.Session.Accounts
@@ -933,52 +1001,60 @@ class App(ctk.CTk):
                     self.log(f"ERROR iniciando Outlook: {e}")
                     return
 
-            try:
-                word_app = None
-                if self.output_format.get() == "pdf":
+            if cfg["output_format"] == "pdf":
+                try:
                     word_app = win32.Dispatch("Word.Application")
                     word_app.Visible = False
-            except Exception as e:
-                self.log(f"ERROR iniciando Word: {e}")
-                return
+                except Exception as e:
+                    self.log(f"ERROR iniciando Word: {e}")
+                    return
 
             rows_total = len(df)
             self.log(f"Registros a procesar: {rows_total}")
             self.after(0, lambda: self.lbl_progress.configure(text=f"0 / {rows_total}"))
 
-            for index, row in df.iterrows():
+            used_names = set()
+            for row_num, (_, row) in enumerate(df.iterrows(), start=1):
                 if not getattr(self, "is_running", True):
                     self.log("=== PROCESO DETENIDO POR EL USUARIO ===")
                     break
-                    
-                row_num = index + 1
+
                 try:
-                    context = {str(col): ("" if pd.isna(row[col]) else str(row[col]))
-                               for col in df.columns}
+                    context = {col: format_cell(row[col]) for col in df.columns}
 
                     doc = DocxTemplate(self.word_template_path)
                     doc.render(context)
 
-                    pattern      = self.entry_filename_pattern.get().strip()
-                    name_for_file = substitute_variables(pattern, context)
+                    name_for_file = substitute_variables(cfg["filename_pattern"], context)
                     name_for_file = re.sub(r'\{\{.*?\}\}', '', name_for_file)
-                    if not name_for_file.strip():
-                        name_for_file = f"Contrato_{row_num}"
                     safe_name = "".join(c for c in name_for_file
                                         if c.isalpha() or c.isdigit() or c in ' ,-_').strip()
+                    if not safe_name:
+                        safe_name = f"Documento_{row_num}"
 
-                    out_docx = os.path.join(self.output_folder, f"{safe_name}.docx")
-                    out_pdf  = os.path.join(self.output_folder, f"{safe_name}.pdf")
+                    # Evitar sobrescribir archivos existentes o de filas anteriores
+                    base = safe_name
+                    n = 2
+                    while base.lower() in used_names:
+                        base = f"{safe_name}_{n}"
+                        n += 1
+                    base_path = unique_base_path(
+                        self.output_folder, base, [".docx", ".pdf", "_Firmado.pdf"])
+                    safe_name = os.path.basename(base_path)
+                    used_names.add(safe_name.lower())
+
+                    out_docx = base_path + ".docx"
+                    out_pdf  = base_path + ".pdf"
                     doc.save(out_docx)
 
-                    if self.output_format.get() == "pdf":
+                    if cfg["output_format"] == "pdf":
                         try:
                             self.log(f"Convirtiendo {safe_name} a PDF…")
                             wd = word_app.Documents.Open(os.path.abspath(out_docx))
                             wd.SaveAs(os.path.abspath(out_pdf), FileFormat=17)
                             wd.Close()
                             try: os.remove(out_docx)
-                            except: pass
+                            except OSError: pass
                             final_path = out_pdf
                         except Exception as pdf_err:
                             self.log(f"Error PDF {safe_name}: {pdf_err}. Usando Word.")
@@ -986,13 +1062,13 @@ class App(ctk.CTk):
                     else:
                         final_path = out_docx
 
-                    if self.enable_signature.get() and final_path.endswith(".pdf"):
+                    if cfg["sign"] and final_path.endswith(".pdf"):
                         self.log(f"Firmando documento {safe_name}...")
-                        signed_path = os.path.join(self.output_folder, f"{safe_name}_Firmado.pdf")
+                        signed_path = base_path + "_Firmado.pdf"
                         success = self._sign_pdf(final_path, signed_path)
                         if success:
                             try: os.remove(final_path)
-                            except: pass
+                            except OSError: pass
                             final_path = signed_path
                         else:
                             self.log("Aviso: El documento se enviará sin firmar debido a un error.")
@@ -1008,21 +1084,23 @@ class App(ctk.CTk):
 
                     if mode == "manual":
                         mail = outlook.CreateItem(0)
-                        mail.Subject  = substitute_variables(self.entry_subject.get(), context)
+                        mail.Subject  = substitute_variables(cfg["subject"], context)
                         body_esc      = html.escape(substitute_variables(
-                            self.txt_body.get("1.0", "end-1c"), context)).replace("\n", "<br>")
+                            cfg["body"], context)).replace("\n", "<br>")
                         mail.HTMLBody = f"<html><body>{body_esc}</body></html>"
                     else:
                         mail = outlook.CreateItemFromTemplate(self.outlook_template_path)
                         try:
-                            mail.HTMLBody = substitute_variables(mail.HTMLBody, context)
-                        except:
+                            # Escapar los valores para no romper el HTML de la plantilla
+                            mail.HTMLBody = substitute_variables(
+                                mail.HTMLBody, context, escape_html=True)
+                        except Exception:
                             mail.Body = substitute_variables(mail.Body, context)
                         mail.Subject = substitute_variables(mail.Subject or "", context)
 
-                    to_extra = substitute_variables(self.entry_to_extra.get().strip(), context)
-                    cc_val   = substitute_variables(self.entry_cc.get().strip(), context)
-                    bcc_val  = substitute_variables(self.entry_bcc.get().strip(), context)
+                    to_extra = substitute_variables(cfg["to_extra"], context)
+                    cc_val   = substitute_variables(cfg["cc"], context)
+                    bcc_val  = substitute_variables(cfg["bcc"], context)
 
                     mail.To  = "; ".join(filter(None, [dest_email, to_extra]))
                     if cc_val:  mail.CC  = cc_val
@@ -1030,10 +1108,12 @@ class App(ctk.CTk):
                     if send_account:
                         mail.SendUsingAccount = send_account
                     mail.Attachments.Add(os.path.abspath(final_path))
-                    
-                    for att in getattr(self, "extra_attachments", []):
+
+                    for att in cfg["extra_attachments"]:
                         if os.path.isfile(att):
                             mail.Attachments.Add(os.path.abspath(att))
+                        else:
+                            self.log(f"Aviso: adjunto no encontrado: {att}")
 
                     if s_mode == "send":
                         mail.Send()
@@ -1071,8 +1151,13 @@ class App(ctk.CTk):
             try:
                 if word_app is not None:
                     word_app.Quit()
-            except:
+            except Exception:
                 pass
+            if com_initialized:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     app = App()

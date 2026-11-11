@@ -2,7 +2,7 @@
 Auto-updater para DocuSend.
 Comprueba la ultima release en GitHub y, si hay version nueva,
 pregunta al usuario si desea actualizar. La descarga e instala en
-%LOCALAPPDATA%\DocuSend\ (carpeta local, fuera de OneDrive)
+%LOCALAPPDATA%\\DocuSend\\ (carpeta local, fuera de OneDrive)
 para evitar interferencias con la sincronizacion al cargar DLLs.
 """
 import os
@@ -23,7 +23,7 @@ EXE_NAME     = "docusend.exe"
 
 
 def _get_install_dir():
-    """Devuelve %LOCALAPPDATA%\DocuSend, creandolo si no existe."""
+    """Devuelve %LOCALAPPDATA%\\DocuSend, creandolo si no existe."""
     local_appdata = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
     d = os.path.join(local_appdata, "DocuSend")
     os.makedirs(d, exist_ok=True)
@@ -91,7 +91,8 @@ def _download_and_restart(app, asset_url):
     un script batch que reemplaza el ejecutable original y lo reinicia.
     """
     if not getattr(sys, "frozen", False):
-        messagebox.showinfo("Dev mode", "Auto-update desactivado en modo desarrollo.")
+        app.after(0, lambda: messagebox.showinfo(
+            "Dev mode", "Auto-update desactivado en modo desarrollo."))
         return
 
     original_exe = sys.executable
