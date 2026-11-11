@@ -84,6 +84,53 @@ def unique_base_path(folder, base_name, extensions):
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
+# ── Sistema visual ─────────────────────────────────────────────────────────────
+# Colores como (tema claro, tema oscuro). Usar siempre estos tokens en lugar de
+# colores sueltos para que la app se vea coherente en ambos temas.
+FONT_FAMILY = "Segoe UI"
+C = {
+    "header":        ("#1f538d", "#14375e"),
+    "header_muted":  ("#c9d6e8", "#9fb3cc"),
+    "primary":       ("#1f6aa5", "#2b7bc0"),
+    "primary_hover": ("#174f7c", "#1f5f96"),
+    "success":       ("#2e7d4f", "#3fb37a"),
+    "success_hover": ("#24633f", "#329363"),
+    "warning":       ("#b26a00", "#f0a030"),
+    "danger":        ("#c62828", "#e5534b"),
+    "danger_hover":  ("#a31f1f", "#c94440"),
+    "text":          ("gray10", "gray92"),
+    "muted":         ("gray40", "gray62"),
+    "border":        ("gray82", "gray28"),
+    "neutral":       ("gray55", "gray35"),
+    "neutral_hover": ("gray45", "gray28"),
+    "card":          ("gray96", "gray16"),
+}
+F = {
+    "h1":      (FONT_FAMILY, 16, "bold"),
+    "title":   (FONT_FAMILY, 14, "bold"),
+    "section": (FONT_FAMILY, 12, "bold"),
+    "body":    (FONT_FAMILY, 12),
+    "small":   (FONT_FAMILY, 11),
+    "mono":    ("Consolas", 11),
+}
+# Fuente por defecto para los widgets que no indican una explícitamente
+try:
+    ctk.ThemeManager.theme["CTkFont"]["family"] = FONT_FAMILY
+    ctk.ThemeManager.theme["CTkFont"]["size"] = 12
+except Exception:
+    pass
+# Mismo azul primario en todos los controles
+try:
+    _t = ctk.ThemeManager.theme
+    _t["CTkButton"]["fg_color"] = list(C["primary"])
+    _t["CTkButton"]["hover_color"] = list(C["primary_hover"])
+    for _w in ("CTkCheckBox", "CTkRadioButton"):
+        _t[_w]["fg_color"] = list(C["primary"])
+        _t[_w]["hover_color"] = list(C["primary_hover"])
+    _t["CTkProgressBar"]["progress_color"] = list(C["primary"])
+except Exception:
+    pass
+
 STEPS = ["Archivos", "Configuración", "Correo", "Generar"]
 
 class App(ctk.CTk):
@@ -113,9 +160,8 @@ class App(ctk.CTk):
             except Exception:
                 pass
                 
-        self.geometry("700x620")
-
-        self.resizable(False, False)
+        self.geometry("720x700")
+        self.minsize(700, 640)
 
         self.after(3000, lambda: check_for_updates(self))
 
@@ -134,13 +180,13 @@ class App(ctk.CTk):
         self.grid_rowconfigure(1, weight=1)
 
         # ── Cabecera ──────────────────────────────────────────────────────────
-        hdr = ctk.CTkFrame(self, fg_color=("#1f538d", "#14375e"), corner_radius=0)
+        hdr = ctk.CTkFrame(self, fg_color=C["header"], corner_radius=0)
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(hdr, text="DocuSend", text_color="white",
-                     font=("Segoe UI", 16, "bold")).grid(row=0, column=0, pady=12, padx=20, sticky="w")
-        ctk.CTkLabel(hdr, text=VERSION, text_color=("gray60", "gray50"),
-                     font=("Segoe UI", 11)).grid(row=0, column=1, pady=12, padx=20, sticky="e")
+                     font=F["h1"]).grid(row=0, column=0, pady=12, padx=20, sticky="w")
+        ctk.CTkLabel(hdr, text=VERSION, text_color=C["header_muted"],
+                     font=F["small"]).grid(row=0, column=1, pady=12, padx=20, sticky="e")
 
         # ── Contenido central ─────────────────────────────────────────────────
         self.content = ctk.CTkFrame(self, fg_color="transparent")
@@ -166,11 +212,11 @@ class App(ctk.CTk):
         nav.grid_columnconfigure(1, weight=1)
 
         self.btn_prev = ctk.CTkButton(nav, text="← Anterior", width=120,
-                                      fg_color="gray50", hover_color="gray40",
+                                      fg_color=C["neutral"], hover_color=C["neutral_hover"],
                                       command=self._prev_step)
         self.btn_prev.grid(row=0, column=0, padx=(0, 8))
 
-        ctk.CTkLabel(nav, text="", font=("Segoe UI", 11)).grid(row=0, column=1)  # spacer
+        ctk.CTkLabel(nav, text="", font=F["small"]).grid(row=0, column=1)  # spacer
 
         self.btn_next = ctk.CTkButton(nav, text="Siguiente →", width=120,
                                       command=self._next_step)
@@ -183,13 +229,13 @@ class App(ctk.CTk):
         
         self.combo_theme = ctk.CTkOptionMenu(foot, values=["Sistema", "Claro", "Oscuro"],
                                              command=self._change_appearance_mode,
-                                             width=80, height=24, font=("Segoe UI", 11), fg_color=("gray75", "gray30"), text_color=("black", "white"))
+                                             width=80, height=24, font=F["small"], fg_color=C["border"], button_color=C["border"], button_hover_color=C["neutral"], text_color=C["text"])
         self.combo_theme.grid(row=0, column=0, sticky="w")
         self.combo_theme.set("Sistema")
 
         ctk.CTkButton(foot, text="Buscar actualizaciones", width=160, height=24,
-                      font=("Segoe UI", 11), fg_color="transparent", border_width=1,
-                      text_color=("gray40", "gray60"),
+                      font=F["small"], fg_color="transparent", border_width=1,
+                      text_color=C["muted"], border_color=C["border"],
                       command=lambda: check_for_updates(self)).grid(row=0, column=2, sticky="e")
 
         self._restore_config()
@@ -210,31 +256,31 @@ class App(ctk.CTk):
 
         for i, name in enumerate(STEPS):
             col = i * 2
-            dot = ctk.CTkLabel(self.ind_frame, text="●", font=("Segoe UI", 18),
-                               text_color="gray60", width=28)
+            dot = ctk.CTkLabel(self.ind_frame, text="●", font=(FONT_FAMILY, 18),
+                               text_color=C["muted"], width=28)
             dot.grid(row=0, column=col)
-            lbl = ctk.CTkLabel(self.ind_frame, text=name, font=("Segoe UI", 11),
-                               text_color="gray60")
+            lbl = ctk.CTkLabel(self.ind_frame, text=name, font=F["small"],
+                               text_color=C["muted"])
             lbl.grid(row=1, column=col)
             self.ind_dots.append(dot)
             self.ind_labels.append(lbl)
             if i < len(STEPS) - 1:
-                ctk.CTkLabel(self.ind_frame, text="────", text_color="gray50",
-                             font=("Segoe UI", 11)).grid(row=0, column=col + 1, sticky="ew")
+                ctk.CTkLabel(self.ind_frame, text="────", text_color=C["border"],
+                             font=F["small"]).grid(row=0, column=col + 1, sticky="ew")
 
     def _update_step_indicator(self, step):
         for i, (dot, lbl) in enumerate(zip(self.ind_dots, self.ind_labels)):
             if i < step:
-                dot.configure(text="✓", text_color=("green3", "green2"))
-                lbl.configure(text_color=("gray50", "gray50"))
+                dot.configure(text="✓", text_color=C["success"])
+                lbl.configure(text_color=C["muted"], font=F["small"])
             elif i == step:
-                dot.configure(text="●", text_color=("dodger blue", "dodger blue"))
-                lbl.configure(text_color=("black", "white"),
-                               font=("Segoe UI", 11, "bold"))
+                dot.configure(text="●", text_color=C["primary"])
+                lbl.configure(text_color=C["text"],
+                               font=(FONT_FAMILY, 11, "bold"))
             else:
-                dot.configure(text="●", text_color="gray60")
-                lbl.configure(text_color="gray60",
-                               font=("Segoe UI", 11))
+                dot.configure(text="●", text_color=C["muted"])
+                lbl.configure(text_color=C["muted"],
+                               font=F["small"])
 
     def _show_step(self, step):
         self.current_step = step
@@ -247,12 +293,18 @@ class App(ctk.CTk):
         self._update_step_indicator(step)
         self.btn_prev.configure(state="normal" if step > 0 else "disabled")
         if step == len(STEPS) - 1:
-            self.btn_next.configure(text="✓ Generar", fg_color=("green4", "green3"),
-                                    hover_color=("green3", "green2"),
-                                    command=self.start_generation)
+            self._refresh_summary()
+            if self.send_mode.get() == "send":
+                self.btn_next.configure(text="✉ Generar y enviar", width=150,
+                                        fg_color=C["danger"], hover_color=C["danger_hover"],
+                                        command=self.start_generation)
+            else:
+                self.btn_next.configure(text="✓ Generar", width=150,
+                                        fg_color=C["success"], hover_color=C["success_hover"],
+                                        command=self.start_generation)
         else:
-            self.btn_next.configure(text="Siguiente →", fg_color=("#1f6aa5", "#1f538a"),
-                                    hover_color=("#144870", "#144870"),
+            self.btn_next.configure(text="Siguiente →", width=120,
+                                    fg_color=C["primary"], hover_color=C["primary_hover"],
                                     command=self._next_step)
 
     def _next_step(self):
@@ -274,14 +326,21 @@ class App(ctk.CTk):
                 messagebox.showwarning("Faltan datos", "Selecciona la carpeta de salida.")
                 return False
         elif step == 1:
-            if not self.entry_email_col.get().strip():
-                messagebox.showwarning("Faltan datos", "Indica la columna de email.")
-                return False
             if not self.entry_filename_pattern.get().strip():
                 messagebox.showwarning("Faltan datos", "Indica el patrón de nombre de archivo.")
                 return False
         elif step == 2:
-            if self.email_mode.get() == "template" and not self.outlook_template_path:
+            if self.send_mode.get() != "none":
+                col = self.entry_email_col.get().strip()
+                if not col:
+                    messagebox.showwarning("Faltan datos", "Indica la columna de email.")
+                    return False
+                if self.excel_columns and col not in self.excel_columns:
+                    messagebox.showwarning("Columna no encontrada",
+                                           f"La columna '{col}' no existe en el Excel.")
+                    return False
+            if self.send_mode.get() != "none" and \
+               self.email_mode.get() == "template" and not self.outlook_template_path:
                 messagebox.showwarning("Faltan datos", "Selecciona la plantilla .oft de Outlook.")
                 return False
         return True
@@ -295,7 +354,7 @@ class App(ctk.CTk):
         f.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(f, text="Selecciona los archivos necesarios",
-                     font=("Segoe UI", 13, "bold")).grid(
+                     font=F["title"]).grid(
             row=0, column=0, columnspan=3, pady=(16, 20), padx=16, sticky="w")
 
         rows = [
@@ -305,29 +364,29 @@ class App(ctk.CTk):
         ]
         for i, (label, attr, cmd, icon) in enumerate(rows, start=1):
             ctk.CTkLabel(f, text=f"{icon}  {label}",
-                         font=("Segoe UI", 12)).grid(row=i*2-1, column=0, columnspan=3,
+                         font=F["body"]).grid(row=i*2-1, column=0, columnspan=3,
                                                     padx=16, pady=(10, 2), sticky="w")
-            lbl = ctk.CTkLabel(f, text="Sin seleccionar", text_color=("gray60", "gray50"),
-                               font=("Segoe UI", 11), anchor="w")
+            lbl = ctk.CTkLabel(f, text="Sin seleccionar", text_color=C["muted"],
+                               font=F["small"], anchor="w")
             lbl.grid(row=i*2, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="ew")
             setattr(self, attr, lbl)
             ctk.CTkButton(f, text="Seleccionar", width=110, command=cmd).grid(
                 row=i*2, column=2, padx=(0, 16), pady=(0, 4))
 
-        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+        ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
             row=7, column=0, columnspan=3, sticky="ew", padx=16, pady=(12, 8))
             
-        ctk.CTkLabel(f, text="📎 Adjuntos estáticos adicionales", font=("Segoe UI", 12)).grid(
+        ctk.CTkLabel(f, text="📎 Adjuntos estáticos adicionales", font=F["body"]).grid(
             row=8, column=0, columnspan=3, padx=16, pady=(0, 2), sticky="w")
             
-        self.lbl_extra_att = ctk.CTkLabel(f, text="Ningún archivo seleccionado", text_color=("gray60", "gray50"),
-                                          font=("Segoe UI", 11), anchor="w", justify="left")
+        self.lbl_extra_att = ctk.CTkLabel(f, text="Ningún archivo seleccionado", text_color=C["muted"],
+                                          font=F["small"], anchor="w", justify="left")
         self.lbl_extra_att.grid(row=9, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="w")
         
         btn_frame = ctk.CTkFrame(f, fg_color="transparent")
         btn_frame.grid(row=9, column=2, padx=(0, 16), pady=(0, 4), sticky="e")
         ctk.CTkButton(btn_frame, text="Añadir", width=55, command=self.add_extra_attachments).pack(side="left", padx=2)
-        ctk.CTkButton(btn_frame, text="Borrar", width=55, fg_color="gray50", command=self.clear_extra_attachments).pack(side="left")
+        ctk.CTkButton(btn_frame, text="Borrar", width=55, fg_color=C["neutral"], hover_color=C["neutral_hover"], command=self.clear_extra_attachments).pack(side="left")
 
     def _change_appearance_mode(self, new_mode: str):
         if new_mode == "Sistema":
@@ -336,11 +395,13 @@ class App(ctk.CTk):
             ctk.set_appearance_mode("Light")
         else:
             ctk.set_appearance_mode("Dark")
+        if hasattr(self, "log_box"):
+            self._apply_log_colors()
         self._save_config()
 
     def clear_extra_attachments(self):
         self.extra_attachments = []
-        self.lbl_extra_att.configure(text="Ningún archivo seleccionado", text_color=("gray60", "gray50"))
+        self.lbl_extra_att.configure(text="Ningún archivo seleccionado", text_color=C["muted"])
         self._save_config()
 
     def add_extra_attachments(self):
@@ -351,7 +412,7 @@ class App(ctk.CTk):
             names = [os.path.basename(f) for f in self.extra_attachments]
             text_disp = f"{count} archivo(s): " + ", ".join(names)
             if len(text_disp) > 55: text_disp = text_disp[:52] + "..."
-            self.lbl_extra_att.configure(text=text_disp, text_color=("black", "white"))
+            self.lbl_extra_att.configure(text=text_disp, text_color=C["text"])
             self._save_config()
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -362,10 +423,10 @@ class App(ctk.CTk):
         self.step_frames.append(f)
 
         ctk.CTkLabel(f, text="Configura el nombre de los archivos",
-                     font=("Segoe UI", 13, "bold")).grid(
+                     font=F["title"]).grid(
             row=0, column=0, columnspan=2, pady=(16, 4), padx=16, sticky="w")
         ctk.CTkLabel(f, text="Usa {{NombreColumna}} para insertar datos del Excel en el nombre del archivo y en la plantilla Word.",
-                     text_color=("gray60", "gray50"), font=("Segoe UI", 11), wraplength=580, justify="left").grid(
+                     text_color=C["muted"], font=F["small"], wraplength=580, justify="left").grid(
             row=1, column=0, columnspan=2, padx=16, pady=(0, 16), sticky="w")
 
         # Patrón nombre archivo
@@ -375,14 +436,14 @@ class App(ctk.CTk):
         self.entry_filename_pattern.grid(row=2, column=1, padx=16, pady=6, sticky="ew")
 
         # Separador
-        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+        ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
             row=3, column=0, columnspan=2, sticky="ew", padx=16, pady=12)
 
         # Insertar campo
-        ctk.CTkLabel(f, text="Insertar campo:", font=("Segoe UI", 12, "bold")).grid(
+        ctk.CTkLabel(f, text="Insertar campo:", font=F["section"]).grid(
             row=4, column=0, padx=16, pady=(0, 6), sticky="w")
         ctk.CTkLabel(f, text="Selecciona un campo y cópialo para pegarlo en la plantilla Word o en el patrón.",
-                     text_color=("gray60", "gray50"), font=("Segoe UI", 11)).grid(
+                     text_color=C["muted"], font=F["small"]).grid(
             row=5, column=0, columnspan=2, padx=16, pady=(0, 8), sticky="w")
 
         frame_insert = ctk.CTkFrame(f, fg_color="transparent")
@@ -397,17 +458,17 @@ class App(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(frame_insert, fg_color="transparent")
         btn_frame.grid(row=0, column=1)
-        ctk.CTkButton(btn_frame, text="📋 Copiar", width=90, fg_color="gray40",
+        ctk.CTkButton(btn_frame, text="📋 Copiar", width=90, fg_color=C["neutral"], hover_color=C["neutral_hover"],
                       command=self._copy_field_to_clipboard).pack(side="left", padx=2)
         ctk.CTkButton(btn_frame, text="→ Patrón", width=90,
                       command=lambda: self._insert_field(self.entry_filename_pattern)).pack(side="left", padx=2)
 
         # ── Firma Digital ──────────────────────────────────────────────────────
-        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+        ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
             row=7, column=0, columnspan=2, sticky="ew", padx=16, pady=(16, 8))
 
         self.enable_signature = ctk.BooleanVar(value=False)
-        self.chk_sign = ctk.CTkCheckBox(f, text="Firmar digitalmente los PDFs", font=("Segoe UI", 12, "bold"),
+        self.chk_sign = ctk.CTkCheckBox(f, text="Firmar digitalmente los PDFs", font=F["section"],
                                         variable=self.enable_signature, command=self.toggle_signature_ui)
         self.chk_sign.grid(row=8, column=0, columnspan=2, padx=16, pady=(0, 6), sticky="w")
 
@@ -426,7 +487,7 @@ class App(ctk.CTk):
         self.pfx_frame = ctk.CTkFrame(self.sign_options_frame, fg_color="transparent")
         self.pfx_frame.pack(fill="x", pady=4)
 
-        self.lbl_pfx_path = ctk.CTkLabel(self.pfx_frame, text="Ningún certificado seleccionado", text_color=("gray60", "gray50"), font=("Segoe UI", 11))
+        self.lbl_pfx_path = ctk.CTkLabel(self.pfx_frame, text="Ningún certificado seleccionado", text_color=C["muted"], font=F["small"])
         self.lbl_pfx_path.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         ctk.CTkButton(self.pfx_frame, text="Seleccionar PFX", width=120, command=self.select_pfx).grid(row=1, column=0, sticky="w", padx=(0, 8))
@@ -444,7 +505,7 @@ class App(ctk.CTk):
         f.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(f, text="Configura el correo electrónico",
-                     font=("Segoe UI", 13, "bold")).grid(
+                     font=F["title"]).grid(
             row=0, column=0, columnspan=3, pady=(12, 6), padx=16, sticky="w")
 
         # Modo email
@@ -473,13 +534,13 @@ class App(ctk.CTk):
         # Template
         self.lbl_oft      = ctk.CTkLabel(self.email_inner, text="Archivo .oft:")
         self.lbl_oft_path = ctk.CTkLabel(self.email_inner, text="Sin seleccionar",
-                                          text_color=("gray60", "gray50"))
+                                          text_color=C["muted"])
         self.btn_oft      = ctk.CTkButton(self.email_inner, text="Seleccionar .oft",
                                            command=self.select_oft)
         self.toggle_email_mode()
 
         # ── Destinatarios ──────────────────────────────────────────────────────
-        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+        ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
             row=3, column=0, columnspan=3, sticky="ew", padx=16, pady=(6, 4))
 
         # Para (columna Excel) + adicional
@@ -500,7 +561,7 @@ class App(ctk.CTk):
         self.entry_bcc = ctk.CTkEntry(f, placeholder_text="oculto@ejemplo.com  o  {{ColumnaCCO}}")
         self.entry_bcc.grid(row=7, column=1, columnspan=2, padx=16, pady=3, sticky="ew")
 
-        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+        ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
             row=8, column=0, columnspan=3, sticky="ew", padx=16, pady=(4, 2))
 
         # Insertar campo — justo debajo del asunto/cuerpo
@@ -513,7 +574,7 @@ class App(ctk.CTk):
         self.combo_fields_email.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         btn_row = ctk.CTkFrame(field_row, fg_color="transparent")
         btn_row.grid(row=0, column=1)
-        ctk.CTkButton(btn_row, text="📋 Copiar", width=85, fg_color="gray40",
+        ctk.CTkButton(btn_row, text="📋 Copiar", width=85, fg_color=C["neutral"], hover_color=C["neutral_hover"],
                       command=self._copy_field_email).pack(side="left", padx=2)
         ctk.CTkButton(btn_row, text="→ Asunto", width=85,
                       command=lambda: self._insert_field_email(self.entry_subject)).pack(side="left", padx=2)
@@ -521,7 +582,7 @@ class App(ctk.CTk):
                       command=lambda: self._insert_field_email(self.txt_body, is_textbox=True)).pack(side="left", padx=2)
 
         # Separador
-        ctk.CTkFrame(f, height=1, fg_color="gray70").grid(
+        ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
             row=10, column=0, columnspan=3, sticky="ew", padx=16, pady=(6, 4))
 
         # Cuenta + formato + modo envío
@@ -557,42 +618,150 @@ class App(ctk.CTk):
         f = ctk.CTkFrame(self.content)
         self.step_frames.append(f)
         f.grid_columnconfigure(0, weight=1)
-        f.grid_rowconfigure(2, weight=1)
 
-        ctk.CTkLabel(f, text="Todo listo — pulsa Generar para empezar",
-                     font=("Segoe UI", 13, "bold")).grid(
-            row=0, column=0, pady=(16, 4), padx=16, sticky="w")
-        ctk.CTkLabel(f, text="El progreso aparecerá en el log de abajo.",
-                     text_color=("gray60", "gray50"), font=("Segoe UI", 11)).grid(
-            row=1, column=0, padx=16, pady=(0, 10), sticky="w")
+        ctk.CTkLabel(f, text="Revisa y genera",
+                     font=F["title"]).grid(row=0, column=0, pady=(14, 8), padx=16, sticky="w")
 
-        # Barra de progreso
+        # Resumen de lo que va a ocurrir
+        self.summary_card = ctk.CTkFrame(f, fg_color=C["card"], border_width=1,
+                                         border_color=C["border"], corner_radius=8)
+        self.summary_card.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 10))
+        self.summary_card.grid_columnconfigure(1, weight=1)
+        self.summary_rows = {}
+        for i, key in enumerate(["Datos", "Documento", "Salida", "Correo", "Destinatarios"]):
+            ctk.CTkLabel(self.summary_card, text=key, font=F["small"], text_color=C["muted"],
+                         anchor="w", width=96).grid(row=i, column=0, padx=(14, 6),
+                                                     pady=(10 if i == 0 else 1, 12 if i == 4 else 1), sticky="nw")
+            val = ctk.CTkLabel(self.summary_card, text="", font=F["body"], text_color=C["text"],
+                               anchor="w", justify="left", wraplength=500)
+            val.grid(row=i, column=1, padx=(0, 14), pady=(10 if i == 0 else 1, 12 if i == 4 else 1), sticky="w")
+            self.summary_rows[key] = val
+        self.lbl_send_warning = ctk.CTkLabel(
+            self.summary_card, text="⚠  Los correos se enviarán directamente. No se pueden deshacer.",
+            font=F["section"], text_color=C["danger"], anchor="w")
+        self.lbl_send_warning.grid(row=5, column=0, columnspan=2, padx=14, pady=(0, 12), sticky="w")
+
+        # Barra de progreso + contadores
         prog_frame = ctk.CTkFrame(f, fg_color="transparent")
         prog_frame.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
         prog_frame.grid_columnconfigure(0, weight=1)
-        self.progress_bar = ctk.CTkProgressBar(prog_frame)
-        self.progress_bar.grid(row=0, column=0, sticky="ew")
+        self.progress_bar = ctk.CTkProgressBar(prog_frame, progress_color=C["primary"])
+        self.progress_bar.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.progress_bar.set(0)
-        self.lbl_progress = ctk.CTkLabel(prog_frame, text="", text_color=("gray60", "gray50"),
-                                          font=("Segoe UI", 11))
-        self.lbl_progress.grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        status_row = ctk.CTkFrame(prog_frame, fg_color="transparent")
+        status_row.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.lbl_progress = ctk.CTkLabel(status_row, text="", text_color=C["muted"],
+                                         font=F["small"])
+        self.lbl_progress.pack(side="left", padx=(0, 14))
+        self.lbl_count_ok   = ctk.CTkLabel(status_row, text="", font=F["small"], text_color=C["success"])
+        self.lbl_count_warn = ctk.CTkLabel(status_row, text="", font=F["small"], text_color=C["warning"])
+        self.lbl_count_err  = ctk.CTkLabel(status_row, text="", font=F["small"], text_color=C["danger"])
+        for w in (self.lbl_count_ok, self.lbl_count_warn, self.lbl_count_err):
+            w.pack(side="left", padx=(0, 12))
+        self._counts = {"ok": 0, "warn": 0, "err": 0}
 
         self.is_running = False
-        self.btn_stop = ctk.CTkButton(prog_frame, text="Detener", width=80, height=24,
-                                      fg_color="#c93434", hover_color="#a82b2b",
+        self.btn_stop = ctk.CTkButton(prog_frame, text="■ Detener", width=90, height=26,
+                                      fg_color=C["neutral"], hover_color=C["danger_hover"],
                                       command=self._stop_generation, state="disabled")
-        self.btn_stop.grid(row=1, column=1, sticky="e", pady=(2, 0))
+        self.btn_stop.grid(row=1, column=1, sticky="e", pady=(4, 0))
 
         # Log
-        self.log_box = ctk.CTkTextbox(f, state="disabled")
+        self.log_box = ctk.CTkTextbox(f, state="disabled", font=F["mono"],
+                                      border_width=1, border_color=C["border"])
         self.log_box.grid(row=3, column=0, sticky="nsew", padx=16, pady=(0, 16))
         f.grid_rowconfigure(3, weight=1)
+        self._apply_log_colors()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Resumen y contadores
+    # ═══════════════════════════════════════════════════════════════════════════
+    def _excel_row_count(self):
+        path = self.excel_data_path
+        try:
+            key = (path, os.path.getmtime(path))
+        except OSError:
+            return None
+        if getattr(self, "_row_count_key", None) != key:
+            try:
+                self._row_count = len(pd.read_excel(path, dtype=object))
+            except Exception:
+                self._row_count = None
+            self._row_count_key = key
+        return self._row_count
+
+    def _refresh_summary(self):
+        n = self._excel_row_count()
+        rows_txt = f"{n} fila{'s' if n != 1 else ''}" if n is not None else "filas desconocidas"
+        self.summary_rows["Datos"].configure(
+            text=f"{os.path.basename(self.excel_data_path) or '—'}  ·  {rows_txt}")
+
+        fmt = "PDF" if self.output_format.get() == "pdf" else "Word (.docx)"
+        doc_txt = f"{os.path.basename(self.word_template_path) or '—'}  →  {fmt}"
+        if self.enable_signature.get() and self.output_format.get() == "pdf":
+            doc_txt += "  ·  firmado con " + ("PFX" if self.sign_mode.get() == "pfx" else "AutoFirma")
+        self.summary_rows["Documento"].configure(text=doc_txt)
+        self.summary_rows["Salida"].configure(text=self.output_folder or "—")
+
+        s_mode  = self.send_mode.get()
+        account = self.combo_account.get()
+        if account.startswith("("):
+            account = "la cuenta predeterminada de Outlook"
+        n_att = len(getattr(self, "extra_attachments", []))
+        att_txt = f"  ·  +{n_att} adjunto{'s' if n_att != 1 else ''} fijo{'s' if n_att != 1 else ''}" if n_att else ""
+        if s_mode == "none":
+            mail_txt, color = "No se envía ningún correo (solo se generan archivos)", C["muted"]
+        elif s_mode == "draft":
+            mail_txt, color = f"Se guardan como borradores en {account}{att_txt}", C["text"]
+        else:
+            mail_txt, color = f"Se ENVÍAN directamente desde {account}{att_txt}", C["danger"]
+        self.summary_rows["Correo"].configure(text=mail_txt, text_color=color)
+
+        if s_mode == "none":
+            dest_txt = "—"
+        else:
+            parts = [f"columna «{self.entry_email_col.get().strip()}»"]
+            for label, entry in (("Para", self.entry_to_extra), ("CC", self.entry_cc), ("CCO", self.entry_bcc)):
+                v = entry.get().strip()
+                if v:
+                    parts.append(f"{label}: {v}")
+            dest_txt = "  ·  ".join(parts)
+        self.summary_rows["Destinatarios"].configure(text=dest_txt)
+
+        if s_mode == "send":
+            self.summary_card.configure(border_color=C["danger"], border_width=2)
+            self.lbl_send_warning.grid()
+        else:
+            self.summary_card.configure(border_color=C["border"], border_width=1)
+            self.lbl_send_warning.grid_remove()
+
+    def _reset_counts(self):
+        self._counts = {"ok": 0, "warn": 0, "err": 0}
+        self._update_counts()
+
+    def _update_counts(self):
+        c = self._counts
+        pl = lambda n, one, many: f"{n} {one if n == 1 else many}"
+        self.lbl_count_ok.configure(
+            text=f"✓ {pl(c['ok'], 'correcto', 'correctos')}" if any(c.values()) else "")
+        self.lbl_count_warn.configure(
+            text=f"⚠ {pl(c['warn'], 'con aviso', 'con avisos')}" if c["warn"] else "")
+        self.lbl_count_err.configure(
+            text=f"✗ {pl(c['err'], 'error', 'errores')}" if c["err"] else "")
+
+    def _set_stop_enabled(self, enabled):
+        if enabled:
+            self.btn_stop.configure(state="normal", fg_color=C["danger"],
+                                    hover_color=C["danger_hover"])
+        else:
+            self.btn_stop.configure(state="disabled", fg_color=C["neutral"])
 
     def _stop_generation(self):
         if self.is_running:
             self.is_running = False
             self.log("Solicitando detención del proceso... (se detendrá tras el contrato actual)")
-            self.btn_stop.configure(state="disabled")
+            self._set_stop_enabled(False)
 
 
 
@@ -698,7 +867,7 @@ class App(ctk.CTk):
             if path and os.path.exists(path):
                 setattr(self, attr, path)
                 lbl.configure(text=os.path.basename(path) if os.path.isfile(path) else path,
-                               text_color="black")
+                               text_color=C["text"])
         if self.excel_data_path:
             self._update_columns()
             if cfg.get("email_col"):
@@ -737,7 +906,7 @@ class App(ctk.CTk):
                 names = [os.path.basename(f) for f in self.extra_attachments]
                 text_disp = f"{count} archivo(s): " + ", ".join(names)
                 if len(text_disp) > 55: text_disp = text_disp[:52] + "..."
-                self.lbl_extra_att.configure(text=text_disp, text_color=("black", "white"))
+                self.lbl_extra_att.configure(text=text_disp, text_color=C["text"])
 
     def _save_config(self):
         save_config({
@@ -762,17 +931,49 @@ class App(ctk.CTk):
     # ═══════════════════════════════════════════════════════════════════════════
     # Log
     # ═══════════════════════════════════════════════════════════════════════════
-    def log(self, text):
-        line = f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n"
+    @staticmethod
+    def _log_level(text):
+        t = text.lower()
+        if text.startswith("==="):
+            return "head"
+        if "error" in t:
+            return "error"
+        if t.startswith("aviso") or "sin email" in t or "sin firmar" in t:
+            return "warn"
+        if ": ok" in t:
+            return "ok"
+        return None
+
+    def _apply_log_colors(self):
+        dark = ctk.get_appearance_mode() == "Dark"
+        idx = 1 if dark else 0
+        for tag, key in (("ok", "success"), ("warn", "warning"), ("error", "danger"), ("head", "primary")):
+            try:
+                self.log_box.tag_config(tag, foreground=C[key][idx])
+            except Exception:
+                pass
+        try:
+            self.log_box.tag_config("time", foreground=C["muted"][idx])
+        except Exception:
+            pass
+
+    def log(self, text, level=None):
+        text = str(text)
+        stamp = f"[{datetime.now().strftime('%H:%M:%S')}] "
+        level = level or self._log_level(text)
         if threading.current_thread() is threading.main_thread():
-            self._append_log(line)
+            self._append_log(stamp, text, level)
         else:
             # Tkinter no es thread-safe: delegar en el hilo principal
-            self.after(0, self._append_log, line)
+            self.after(0, self._append_log, stamp, text, level)
 
-    def _append_log(self, line):
+    def _append_log(self, stamp, text, level=None):
         self.log_box.configure(state="normal")
-        self.log_box.insert("end", line)
+        self.log_box.insert("end", stamp, "time")
+        if level:
+            self.log_box.insert("end", text + "\n", level)
+        else:
+            self.log_box.insert("end", text + "\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
@@ -804,14 +1005,14 @@ class App(ctk.CTk):
         f = filedialog.askopenfilename(title="Plantilla Word", filetypes=[("Word", "*.docx")])
         if f:
             self.word_template_path = f
-            self.lbl_word.configure(text=os.path.basename(f), text_color="black")
+            self.lbl_word.configure(text=os.path.basename(f), text_color=C["text"])
             self._save_config()
 
     def select_excel(self):
         f = filedialog.askopenfilename(title="Datos Excel", filetypes=[("Excel", "*.xlsx")])
         if f:
             self.excel_data_path = f
-            self.lbl_excel.configure(text=os.path.basename(f), text_color="black")
+            self.lbl_excel.configure(text=os.path.basename(f), text_color=C["text"])
             self._update_columns()
             self._save_config()
 
@@ -819,21 +1020,21 @@ class App(ctk.CTk):
         d = filedialog.askdirectory(title="Carpeta de salida")
         if d:
             self.output_folder = d
-            self.lbl_output.configure(text=d, text_color="black")
+            self.lbl_output.configure(text=d, text_color=C["text"])
             self._save_config()
 
     def select_oft(self):
         f = filedialog.askopenfilename(title="Plantilla Outlook", filetypes=[("Outlook Template", "*.oft")])
         if f:
             self.outlook_template_path = f
-            self.lbl_oft_path.configure(text=os.path.basename(f), text_color="black")
+            self.lbl_oft_path.configure(text=os.path.basename(f), text_color=C["text"])
             self._save_config()
 
     def select_pfx(self):
         f = filedialog.askopenfilename(title="Certificado PFX/P12", filetypes=[("Certificados", "*.pfx *.p12")])
         if f:
             self.pfx_path = f
-            self.lbl_pfx_path.configure(text=os.path.basename(f), text_color="black")
+            self.lbl_pfx_path.configure(text=os.path.basename(f), text_color=C["text"])
             
     def toggle_signature_ui(self):
         if self.enable_signature.get():
@@ -924,6 +1125,16 @@ class App(ctk.CTk):
                 self._show_step(step)
                 return
 
+        if self.send_mode.get() == "send":
+            n = self._excel_row_count()
+            qty = f"hasta {n} correos" if n is not None else "los correos"
+            if not messagebox.askyesno(
+                    "Confirmar envío",
+                    f"Se van a ENVIAR {qty} directamente desde Outlook.\n\n"
+                    "Esta acción no se puede deshacer. ¿Continuar?",
+                    icon="warning", default="no"):
+                return
+
         self._save_config()
         # Leer todos los valores de la interfaz aquí (hilo principal):
         # el hilo de trabajo no debe tocar widgets de Tkinter.
@@ -947,9 +1158,10 @@ class App(ctk.CTk):
         self._show_step(3)
         self.progress_bar.set(0)
         self.lbl_progress.configure(text="")
+        self._reset_counts()
         self.log("=== INICIANDO PROCESO ===")
         self.is_running = True
-        self.btn_stop.configure(state="normal")
+        self._set_stop_enabled(True)
         self.btn_next.configure(state="disabled")
         self.btn_prev.configure(state="disabled")
         threading.Thread(target=self.process_data, daemon=True).start()
@@ -1019,6 +1231,7 @@ class App(ctk.CTk):
                     self.log("=== PROCESO DETENIDO POR EL USUARIO ===")
                     break
 
+                row_status = "ok"
                 try:
                     context = {col: format_cell(row[col]) for col in df.columns}
 
@@ -1058,6 +1271,7 @@ class App(ctk.CTk):
                             final_path = out_pdf
                         except Exception as pdf_err:
                             self.log(f"Error PDF {safe_name}: {pdf_err}. Usando Word.")
+                            row_status = "warn"
                             final_path = out_docx
                     else:
                         final_path = out_docx
@@ -1072,6 +1286,7 @@ class App(ctk.CTk):
                             final_path = signed_path
                         else:
                             self.log("Aviso: El documento se enviará sin firmar debido a un error.")
+                            row_status = "warn"
 
                     if s_mode == "none":
                         self.log(f"Fila {row_num}: OK — {os.path.basename(final_path)}")
@@ -1080,6 +1295,7 @@ class App(ctk.CTk):
                     dest_email = context.get(email_col, "").strip()
                     if not dest_email:
                         self.log(f"Fila {row_num}: sin email — archivo: {os.path.basename(final_path)}")
+                        row_status = "warn"
                         continue
 
                     if mode == "manual":
@@ -1114,6 +1330,7 @@ class App(ctk.CTk):
                             mail.Attachments.Add(os.path.abspath(att))
                         else:
                             self.log(f"Aviso: adjunto no encontrado: {att}")
+                            row_status = "warn"
 
                     if s_mode == "send":
                         mail.Send()
@@ -1130,7 +1347,10 @@ class App(ctk.CTk):
 
                 except Exception as e:
                     self.log(f"Error fila {row_num}: {e}")
+                    row_status = "err"
                 finally:
+                    self._counts[row_status] += 1
+                    self.after(0, self._update_counts)
                     p = row_num / rows_total
                     self.after(0, lambda p=p, n=row_num, t=rows_total: (
                         self.progress_bar.set(p),
@@ -1145,7 +1365,7 @@ class App(ctk.CTk):
             self.log(f"Error general: {e}")
         finally:
             self.is_running = False
-            self.after(0, lambda: self.btn_stop.configure(state="disabled"))
+            self.after(0, lambda: self._set_stop_enabled(False))
             self.after(0, lambda: self.btn_next.configure(state="normal"))
             self.after(0, lambda: self.btn_prev.configure(state="normal"))
             try:
