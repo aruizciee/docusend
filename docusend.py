@@ -46,11 +46,54 @@ def save_config(data):
     except Exception:
         pass
 
+_PLACEHOLDER_RE = re.compile(r'\{\{\s*(.*?)\s*\}\}')
+
 def substitute_variables(text, context, escape_html=False):
-    for k, v in context.items():
-        val = html.escape(str(v)) if escape_html else str(v)
-        text = text.replace("{{" + k + "}}", val)
-    return text
+    """Sustituye {{Columna}} (con o sin espacios dentro de las llaves) en una
+    sola pasada. Los campos desconocidos se dejan tal cual."""
+    def repl(m):
+        key = m.group(1)
+        if key not in context and escape_html:
+            key = html.unescape(key)
+        if key not in context:
+            return m.group(0)
+        val = str(context[key])
+        return html.escape(val) if escape_html else val
+    return _PLACEHOLDER_RE.sub(repl, text or "")
+
+def find_placeholders(text):
+    """Nombres de los campos {{...}} presentes en un texto."""
+    return {m.group(1) for m in _PLACEHOLDER_RE.finditer(text or "")}
+
+_JINJA_RESERVED = {
+    "true", "false", "none", "and", "or", "not", "if", "else", "elif", "for", "in",
+    "is", "loop", "self", "super", "varargs", "kwargs", "caller", "range", "dict",
+    "lipsum", "cycler", "joiner", "namespace", "block", "set", "with", "import",
+}
+
+def column_aliases(columns):
+    """La plantilla Word se procesa con Jinja2, que no admite nombres con
+    espacios, guiones, etc. Devuelve {columna: alias válido} para esas columnas."""
+    aliases = {}
+    for i, name in enumerate(columns):
+        if not name.isidentifier() or name.lower() in _JINJA_RESERVED:
+            aliases[name] = f"campo_{i}_"
+    return aliases
+
+class ColumnTemplate(DocxTemplate):
+    """DocxTemplate que acepta {{Nombre completo}} y otros nombres de columna
+    que no son identificadores válidos, traduciéndolos a un alias interno."""
+    def __init__(self, template_file, aliases=None):
+        super().__init__(template_file)
+        self._col_aliases = dict(aliases or {})
+
+    def patch_xml(self, src_xml):
+        xml = super().patch_xml(src_xml)
+        for name, alias in self._col_aliases.items():
+            for variant in {name, html.escape(name, quote=False), html.escape(name)}:
+                xml = re.sub(r'\{\{\s*' + re.escape(variant) + r'\s*\}\}',
+                             lambda m, a=alias: '{{ ' + a + ' }}', xml)
+        return xml
 
 def format_cell(value):
     """Convierte un valor de Excel en texto legible para plantillas y correos."""
@@ -238,8 +281,12 @@ class App(ctk.CTk):
                       text_color=C["muted"], border_color=C["border"],
                       command=lambda: check_for_updates(self)).grid(row=0, column=2, sticky="e")
 
+        self._ready = False          # no guardar config hasta terminar de restaurarla
+        self._saved_account = ""
         self._restore_config()
+        self._ready = True
         self._show_step(0)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(1500, self._load_outlook_accounts)
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -309,10 +356,18 @@ class App(ctk.CTk):
 
     def _next_step(self):
         if self._validate_step(self.current_step):
+            self._save_config()
             self._show_step(self.current_step + 1)
 
     def _prev_step(self):
+        self._save_config()
         self._show_step(self.current_step - 1)
+
+    def _on_close(self):
+        try:
+            self._save_config()
+        finally:
+            self.destroy()
 
     def _validate_step(self, step):
         if step == 0:
@@ -325,6 +380,17 @@ class App(ctk.CTk):
             if not self.output_folder:
                 messagebox.showwarning("Faltan datos", "Selecciona la carpeta de salida.")
                 return False
+            for label, path, check in [
+                ("la plantilla Word", self.word_template_path, os.path.isfile),
+                ("el archivo Excel",  self.excel_data_path,    os.path.isfile),
+                ("la carpeta de salida", self.output_folder,   os.path.isdir),
+            ]:
+                if not check(path):
+                    messagebox.showwarning(
+                        "No encontrado",
+                        f"No se encuentra {label}:\n{path}\n\n"
+                        "Comprueba que la unidad está conectada o selecciónalo de nuevo.")
+                    return False
         elif step == 1:
             if not self.entry_filename_pattern.get().strip():
                 messagebox.showwarning("Faltan datos", "Indica el patrón de nombre de archivo.")
@@ -342,6 +408,11 @@ class App(ctk.CTk):
             if self.send_mode.get() != "none" and \
                self.email_mode.get() == "template" and not self.outlook_template_path:
                 messagebox.showwarning("Faltan datos", "Selecciona la plantilla .oft de Outlook.")
+                return False
+            if self.send_mode.get() != "none" and self.email_mode.get() == "template" \
+               and not os.path.isfile(self.outlook_template_path):
+                messagebox.showwarning("No encontrado",
+                                       f"No se encuentra la plantilla .oft:\n{self.outlook_template_path}")
                 return False
         return True
 
@@ -736,6 +807,17 @@ class App(ctk.CTk):
             self.summary_card.configure(border_color=C["border"], border_width=1)
             self.lbl_send_warning.grid_remove()
 
+    def _abort_with_problems(self, title, problems):
+        """Registra los problemas en el log y avisa al usuario (seguro entre hilos)."""
+        self.log(f"ERROR: {title}:")
+        for pr in problems:
+            self.log(f"   · {pr}", level="error")
+        self.log("No se ha generado ni enviado nada. Corrige los campos y vuelve a intentarlo.",
+                 level="error")
+        msg = title + ":\n\n" + "\n".join("• " + pr for pr in problems) + \
+            "\n\nNo se ha generado ni enviado nada."
+        self.after(0, lambda: messagebox.showerror("Campos no reconocidos", msg))
+
     def _reset_counts(self):
         self._counts = {"ok": 0, "warn": 0, "err": 0}
         self._update_counts()
@@ -789,7 +871,11 @@ class App(ctk.CTk):
     def _set_account_combo(self, names):
         if names:
             self.combo_account.configure(values=names, state="readonly")
-            self.combo_account.set(names[0])
+            current = self.combo_account.get()
+            saved = getattr(self, "_saved_account", "")
+            # Mantener la cuenta ya elegida o la guardada; si no, la primera
+            self.combo_account.set(current if current in names
+                                   else saved if saved in names else names[0])
         else:
             self.combo_account.configure(values=["(sin cuentas)"])
             self.combo_account.set("(sin cuentas)")
@@ -864,11 +950,17 @@ class App(ctk.CTk):
             ("outlook_template_path", self.lbl_oft_path,"outlook_template_path"),
         ]:
             path = cfg.get(key, "")
-            if path and os.path.exists(path):
-                setattr(self, attr, path)
+            if not path:
+                continue
+            # Conservar la ruta aunque ahora no exista (p. ej. unidad desconectada)
+            setattr(self, attr, path)
+            if os.path.exists(path):
                 lbl.configure(text=os.path.basename(path) if os.path.isfile(path) else path,
-                               text_color=C["text"])
-        if self.excel_data_path:
+                              text_color=C["text"])
+            else:
+                shown = path if key == "output_folder" else os.path.basename(path)
+                lbl.configure(text=f"{shown}  (no encontrado)", text_color=C["warning"])
+        if self.excel_data_path and os.path.isfile(self.excel_data_path):
             self._update_columns()
             if cfg.get("email_col"):
                 self.combo_fields_email.set(cfg["email_col"])
@@ -907,9 +999,35 @@ class App(ctk.CTk):
                 text_disp = f"{count} archivo(s): " + ", ".join(names)
                 if len(text_disp) > 55: text_disp = text_disp[:52] + "..."
                 self.lbl_extra_att.configure(text=text_disp, text_color=C["text"])
+        # Firma (la contraseña del certificado nunca se guarda)
+        if cfg.get("sign_mode") in ("pfx", "autofirma"):
+            self.sign_mode.set(cfg["sign_mode"])
+        if cfg.get("pfx_path"):
+            self.pfx_path = cfg["pfx_path"]
+            if os.path.isfile(self.pfx_path):
+                self.lbl_pfx_path.configure(text=os.path.basename(self.pfx_path), text_color=C["text"])
+            else:
+                self.lbl_pfx_path.configure(
+                    text=f"{os.path.basename(self.pfx_path)}  (no encontrado)", text_color=C["warning"])
+        if cfg.get("enable_signature"):
+            self.enable_signature.set(True)
+        self.toggle_signature_ui()
+        self.toggle_sign_mode_ui()
+        self._saved_account = cfg.get("outlook_account", "")
 
     def _save_config(self):
+        if not getattr(self, "_ready", False):
+            return
+        account = self.combo_account.get()
+        if account.startswith("("):          # "(cargando…)", "(sin cuentas)"…
+            account = self._saved_account
+        else:
+            self._saved_account = account
         save_config({
+            "enable_signature":      bool(self.enable_signature.get()),
+            "sign_mode":             self.sign_mode.get(),
+            "pfx_path":              self.pfx_path,
+            "outlook_account":       account,
             "word_template_path":    self.word_template_path,
             "excel_data_path":       self.excel_data_path,
             "output_folder":         self.output_folder,
@@ -1035,6 +1153,7 @@ class App(ctk.CTk):
         if f:
             self.pfx_path = f
             self.lbl_pfx_path.configure(text=os.path.basename(f), text_color=C["text"])
+            self._save_config()
             
     def toggle_signature_ui(self):
         if self.enable_signature.get():
@@ -1193,6 +1312,33 @@ class App(ctk.CTk):
                 self.log(f"Columnas disponibles: {', '.join(df.columns)}")
                 return
 
+            # ── Comprobación previa de campos {{...}} ─────────────────────────
+            columns = list(df.columns)
+            aliases = column_aliases(columns)
+            problems = []
+            text_fields = [("Patrón de nombre de archivo", cfg["filename_pattern"])]
+            if s_mode != "none":
+                text_fields += [("Para (adicional)", cfg["to_extra"]),
+                                ("CC", cfg["cc"]), ("CCO", cfg["bcc"])]
+                if mode == "manual":
+                    text_fields += [("Asunto", cfg["subject"]), ("Cuerpo", cfg["body"])]
+            for label, text in text_fields:
+                unknown = sorted(find_placeholders(text) - set(columns))
+                if unknown:
+                    problems.append(f"{label}: " + ", ".join("{{" + u + "}}" for u in unknown))
+            try:
+                tpl_vars = ColumnTemplate(self.word_template_path, aliases) \
+                    .get_undeclared_template_variables()
+                unknown = sorted(tpl_vars - set(columns) - set(aliases.values()))
+                if unknown:
+                    problems.append("Plantilla Word: " + ", ".join("{{" + u + "}}" for u in unknown))
+            except Exception as e:
+                problems.append(f"Plantilla Word: no se pudo analizar ({e})")
+            if problems:
+                self._abort_with_problems(
+                    "Hay campos que no coinciden con ninguna columna del Excel", problems)
+                return
+
             outlook      = None
             send_account = None
             if s_mode != "none":
@@ -1200,7 +1346,7 @@ class App(ctk.CTk):
                     outlook = win32.Dispatch("Outlook.Application")
                     selected_label = cfg["account_label"]
                     for name, smtp in self.outlook_accounts:
-                        if selected_label.startswith(name):
+                        if selected_label == f"{name} ({smtp})":
                             accounts = outlook.Session.Accounts
                             for i in range(1, accounts.Count + 1):
                                 if accounts.Item(i).SmtpAddress == smtp:
@@ -1211,6 +1357,25 @@ class App(ctk.CTk):
                         self.log(f"Cuenta: {selected_label}")
                 except Exception as e:
                     self.log(f"ERROR iniciando Outlook: {e}")
+                    return
+
+            if s_mode != "none" and mode != "manual":
+                try:
+                    probe = outlook.CreateItemFromTemplate(self.outlook_template_path)
+                    found = find_placeholders(probe.Subject or "")
+                    # En el HTML se ignoran coincidencias partidas por etiquetas
+                    found |= {html.unescape(n) for n in find_placeholders(probe.HTMLBody or "")
+                              if "<" not in n and len(n) < 80}
+                    try: probe.Close(1)  # olDiscard
+                    except Exception: pass
+                    unknown = sorted(found - set(columns))
+                except Exception as e:
+                    self.log(f"Aviso: no se pudo revisar la plantilla .oft: {e}")
+                    unknown = []
+                if unknown:
+                    self._abort_with_problems(
+                        "Hay campos que no coinciden con ninguna columna del Excel",
+                        ["Plantilla .oft: " + ", ".join("{{" + u + "}}" for u in unknown)])
                     return
 
             if cfg["output_format"] == "pdf":
@@ -1235,8 +1400,12 @@ class App(ctk.CTk):
                 try:
                     context = {col: format_cell(row[col]) for col in df.columns}
 
-                    doc = DocxTemplate(self.word_template_path)
-                    doc.render(context)
+                    held = []  # motivos por los que este correo no debe enviarse directamente
+                    render_ctx = dict(context)
+                    render_ctx.update({alias: context[col] for col, alias in aliases.items()})
+                    doc = ColumnTemplate(self.word_template_path, aliases)
+                    # autoescape: sin él, caracteres como & o < desaparecen del documento
+                    doc.render(render_ctx, autoescape=True)
 
                     name_for_file = substitute_variables(cfg["filename_pattern"], context)
                     name_for_file = re.sub(r'\{\{.*?\}\}', '', name_for_file)
@@ -1272,6 +1441,7 @@ class App(ctk.CTk):
                         except Exception as pdf_err:
                             self.log(f"Error PDF {safe_name}: {pdf_err}. Usando Word.")
                             row_status = "warn"
+                            held.append("no se pudo convertir a PDF")
                             final_path = out_docx
                     else:
                         final_path = out_docx
@@ -1285,8 +1455,9 @@ class App(ctk.CTk):
                             except OSError: pass
                             final_path = signed_path
                         else:
-                            self.log("Aviso: El documento se enviará sin firmar debido a un error.")
+                            self.log(f"Aviso: no se pudo firmar {safe_name}; queda sin firmar.")
                             row_status = "warn"
+                            held.append("no se pudo firmar")
 
                     if s_mode == "none":
                         self.log(f"Fila {row_num}: OK — {os.path.basename(final_path)}")
@@ -1331,6 +1502,14 @@ class App(ctk.CTk):
                         else:
                             self.log(f"Aviso: adjunto no encontrado: {att}")
                             row_status = "warn"
+                            held.append(f"falta el adjunto {os.path.basename(att)}")
+
+                    if s_mode == "send" and held:
+                        # Nunca enviar un correo incompleto: se deja en Borradores para revisarlo
+                        mail.Save()
+                        self.log(f"Fila {row_num}: NO ENVIADO ({'; '.join(held)}) — "
+                                 f"guardado como borrador para {mail.To}", level="warn")
+                        continue
 
                     if s_mode == "send":
                         mail.Send()
