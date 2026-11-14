@@ -10,6 +10,9 @@ import html
 from datetime import datetime
 import threading
 import subprocess
+import csv
+import shutil
+import time
 from io import BytesIO
 import sys
 from auto_updater import check_for_updates
@@ -64,6 +67,16 @@ def substitute_variables(text, context, escape_html=False):
 def find_placeholders(text):
     """Nombres de los campos {{...}} presentes en un texto."""
     return {m.group(1) for m in _PLACEHOLDER_RE.finditer(text or "")}
+
+_EMAIL_RE = re.compile(r'^[^@\s<>()\[\],;:"]+@[^@\s<>()\[\],;:"]+\.[^@\s<>()\[\],;:".]{2,}$')
+
+def invalid_emails(text):
+    """Direcciones con formato incorrecto en un texto (separadas por ; o ,)."""
+    parts = [p.strip() for p in re.split(r'[;,]', text or "") if p.strip()]
+    return [p for p in parts if not _EMAIL_RE.match(p)]
+
+AUTOFIRMA_EXE = r'C:\Program Files\Autofirma\Autofirma\AutofirmaCommandLine.exe'
+REPORT_DIR = "_DocuSend_informes"
 
 _JINJA_RESERVED = {
     "true", "false", "none", "and", "or", "not", "if", "else", "elif", "for", "in",
@@ -364,6 +377,32 @@ class App(ctk.CTk):
         self._show_step(self.current_step - 1)
 
     def _on_close(self):
+        if getattr(self, "_closing", False):
+            return
+        if self.is_running:
+            if not messagebox.askyesno(
+                    "Proceso en curso",
+                    "Hay un proceso en curso.\n\nSe detendrá al terminar el documento actual, "
+                    "se guardará el informe y la aplicación se cerrará.\n\n¿Detener y salir?",
+                    icon="warning", default="no"):
+                return
+            self._closing = True
+            self.is_running = False
+            self._set_stop_enabled(False)
+            self.log("Cerrando: esperando a que termine el documento actual...")
+            self._close_deadline = time.monotonic() + 150
+            self._wait_and_close()
+            return
+        self._finish_close()
+
+    def _wait_and_close(self):
+        worker = getattr(self, "_worker", None)
+        if worker is not None and worker.is_alive() and time.monotonic() < self._close_deadline:
+            self.after(200, self._wait_and_close)
+            return
+        self._finish_close()
+
+    def _finish_close(self):
         try:
             self._save_config()
         finally:
@@ -733,10 +772,22 @@ class App(ctk.CTk):
         self._counts = {"ok": 0, "warn": 0, "err": 0}
 
         self.is_running = False
-        self.btn_stop = ctk.CTkButton(prog_frame, text="■ Detener", width=90, height=26,
+        actions = ctk.CTkFrame(prog_frame, fg_color="transparent")
+        actions.grid(row=1, column=1, sticky="e", pady=(4, 0))
+        ghost = dict(height=26, fg_color="transparent", border_width=1, border_color=C["border"],
+                     text_color=C["text"], hover_color=C["border"], font=F["small"])
+        self.btn_open_folder = ctk.CTkButton(actions, text="Abrir carpeta", width=100,
+                                             command=lambda: self._open_path(self.output_folder), **ghost)
+        self.btn_open_folder.pack(side="left", padx=(0, 6))
+        self.btn_open_report = ctk.CTkButton(actions, text="Ver informe", width=90, state="disabled",
+                                             command=lambda: self._open_path(self._last_report), **ghost)
+        self.btn_open_report.pack(side="left", padx=(0, 6))
+        self._last_report = ""
+        self._run_log = []
+        self.btn_stop = ctk.CTkButton(actions, text="■ Detener", width=90, height=26,
                                       fg_color=C["neutral"], hover_color=C["danger_hover"],
                                       command=self._stop_generation, state="disabled")
-        self.btn_stop.grid(row=1, column=1, sticky="e", pady=(4, 0))
+        self.btn_stop.pack(side="left")
 
         # Log
         self.log_box = ctk.CTkTextbox(f, state="disabled", font=F["mono"],
@@ -756,11 +807,31 @@ class App(ctk.CTk):
             return None
         if getattr(self, "_row_count_key", None) != key:
             try:
-                self._row_count = len(pd.read_excel(path, dtype=object))
+                df = pd.read_excel(path, dtype=object)
+                df.columns = [str(c) for c in df.columns]
+                self._excel_df, self._row_count = df, len(df)
             except Exception:
-                self._row_count = None
+                self._excel_df, self._row_count = None, None
             self._row_count_key = key
         return self._row_count
+
+    def _email_issues(self):
+        """(filas sin email, [(fila, valor no válido)]) según la columna elegida."""
+        self._excel_row_count()
+        df  = getattr(self, "_excel_df", None)
+        col = self.entry_email_col.get().strip()
+        if df is None or col not in df.columns:
+            return [], []
+        empty, invalid = [], []
+        for n, value in enumerate(df[col].tolist(), start=1):
+            text = format_cell(value)
+            if not text:
+                empty.append(n)
+            else:
+                bad = invalid_emails(text)
+                if bad:
+                    invalid.append((n, bad[0]))
+        return empty, invalid
 
     def _refresh_summary(self):
         n = self._excel_row_count()
@@ -797,8 +868,15 @@ class App(ctk.CTk):
                 v = entry.get().strip()
                 if v:
                     parts.append(f"{label}: {v}")
+            empty, invalid = self._email_issues()
+            if empty:
+                parts.append(f"⚠ {len(empty)} sin email")
+            if invalid:
+                parts.append(f"⚠ {len(invalid)} no válido{'s' if len(invalid) != 1 else ''}")
             dest_txt = "  ·  ".join(parts)
-        self.summary_rows["Destinatarios"].configure(text=dest_txt)
+            dest_color = C["warning"] if (empty or invalid) else C["text"]
+        self.summary_rows["Destinatarios"].configure(
+            text=dest_txt, text_color=C["muted"] if s_mode == "none" else dest_color)
 
         if s_mode == "send":
             self.summary_card.configure(border_color=C["danger"], border_width=2)
@@ -817,6 +895,42 @@ class App(ctk.CTk):
         msg = title + ":\n\n" + "\n".join("• " + pr for pr in problems) + \
             "\n\nNo se ha generado ni enviado nada."
         self.after(0, lambda: messagebox.showerror("Campos no reconocidos", msg))
+
+    def _open_path(self, path):
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("No encontrado", f"No se encuentra:\n{path or '(sin ruta)'}")
+            return
+        try:
+            if hasattr(os, "startfile"):
+                os.startfile(path)
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            messagebox.showwarning("No se pudo abrir", str(e))
+
+    def _write_report(self, records, stamp):
+        """Guarda un CSV con el resultado de cada fila y el log de la ejecución.
+        Devuelve la ruta del CSV, o "" si no se pudo escribir."""
+        try:
+            folder = os.path.join(self.output_folder, REPORT_DIR)
+            os.makedirs(folder, exist_ok=True)
+            csv_path = os.path.join(folder, f"informe_{stamp}.csv")
+            # utf-8-sig y ';' para que Excel en español lo abra directamente
+            with open(csv_path, "w", newline="", encoding="utf-8-sig") as fh:
+                w = csv.DictWriter(fh, fieldnames=["Fila", "Estado", "Archivo", "Destinatario", "Detalle"],
+                                   delimiter=";")
+                w.writeheader()
+                w.writerows(records)
+            with open(os.path.join(folder, f"log_{stamp}.txt"), "w", encoding="utf-8") as fh:
+                fh.writelines(self._run_log)
+            return csv_path
+        except Exception as e:
+            self.log(f"Aviso: no se pudo guardar el informe: {e}")
+            return ""
+
+    def _report_ready(self, path):
+        self._last_report = path
+        self.btn_open_report.configure(state="normal" if path else "disabled")
 
     def _reset_counts(self):
         self._counts = {"ok": 0, "warn": 0, "err": 0}
@@ -1078,6 +1192,8 @@ class App(ctk.CTk):
     def log(self, text, level=None):
         text = str(text)
         stamp = f"[{datetime.now().strftime('%H:%M:%S')}] "
+        if hasattr(self, "_run_log"):
+            self._run_log.append(stamp + text + "\n")
         level = level or self._log_level(text)
         if threading.current_thread() is threading.main_thread():
             self._append_log(stamp, text, level)
@@ -1167,24 +1283,60 @@ class App(ctk.CTk):
         else:
             self.pfx_frame.pack_forget()
 
+    def _load_signer(self, password):
+        """Carga el certificado PFX. Devuelve el firmante o None si no se puede abrir."""
+        encodings = ("utf-8", "latin1") if password else (None,)
+        for enc in encodings:
+            try:
+                pwd = password.encode(enc) if enc else None
+                signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd)
+                if signer is not None:
+                    return signer
+            except Exception:
+                continue
+        return None
+
+    def _preflight_signing(self):
+        """Comprueba la firma una sola vez antes de empezar. False = no continuar."""
+        self._signer = None
+        if not self.enable_signature.get():
+            return True
+        if self.output_format.get() != "pdf":
+            return messagebox.askyesno(
+                "Firma no aplicable",
+                "La firma digital solo se aplica a PDF, y el formato elegido es Word.\n\n"
+                "¿Continuar sin firmar?", icon="warning", default="no")
+        if self.sign_mode.get() == "pfx":
+            if not PYHANKO_AVAILABLE:
+                messagebox.showerror("Firma", "La librería de firma (pyhanko) no está disponible.")
+                return False
+            if not self.pfx_path or not os.path.isfile(self.pfx_path):
+                messagebox.showerror("Firma", "Selecciona el certificado PFX en el paso Configuración.")
+                self._show_step(1)
+                return False
+            self._signer = self._load_signer(self.entry_pfx_pass.get())
+            if self._signer is None:
+                messagebox.showerror(
+                    "Firma", "No se pudo abrir el certificado.\n\n"
+                    "Comprueba la contraseña y que el archivo PFX sea válido.")
+                self._show_step(1)
+                return False
+        else:
+            if not os.path.isfile(AUTOFIRMA_EXE) and not shutil.which("AutofirmaCommandLine"):
+                messagebox.showerror(
+                    "Firma", "No se encuentra AutoFirma en este equipo.\n\n"
+                    "Instálalo o elige firmar con certificado PFX.")
+                return False
+        return True
+
     def _sign_pdf(self, input_pdf, output_pdf):
         mode = self._run["sign_mode"]
         if mode == "pfx":
-            if not PYHANKO_AVAILABLE:
-                self.log("ERROR: La librería pyhanko no está instalada.")
-                return False
-            if not self.pfx_path:
-                self.log("ERROR: No has seleccionado un archivo PFX.")
-                return False
-            password = self._run["pfx_pass"]
             try:
-                # Usar el cargador nativo de pyhanko (usa cryptography internamente)
-                pwd_bytes = password.encode('utf-8') if password else None
-                try:
-                    signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd_bytes)
-                except Exception:
-                    pwd_bytes = password.encode('latin1') if password else None
-                    signer = signers.SimpleSigner.load_pkcs12(self.pfx_path, passphrase=pwd_bytes)
+                signer = getattr(self, "_signer", None) or self._load_signer(self._run["pfx_pass"])
+                if signer is None:
+                    self.log("ERROR: no se pudo abrir el certificado PFX.")
+                    return False
 
                 with open(input_pdf, 'rb') as doc_b, open(output_pdf, 'wb') as out_f:
                     pdf_w = IncrementalPdfFileWriter(doc_b, strict=False)
@@ -1200,7 +1352,7 @@ class App(ctk.CTk):
         elif mode == "autofirma":
             try:
                 # Buscar AutofirmaCommandLine.exe en Program Files
-                af_cmd = r'C:\Program Files\Autofirma\Autofirma\AutofirmaCommandLine.exe'
+                af_cmd = AUTOFIRMA_EXE
                 if not os.path.isfile(af_cmd):
                     # Fallback: intentar desde PATH
                     af_cmd = 'AutofirmaCommandLine'
@@ -1244,15 +1396,38 @@ class App(ctk.CTk):
                 self._show_step(step)
                 return
 
-        if self.send_mode.get() == "send":
+        if self.is_running:
+            return
+        if not self._preflight_signing():
+            return
+
+        s_mode = self.send_mode.get()
+        if s_mode != "none":
+            empty, invalid = self._email_issues()
+            notes = []
+            if empty:
+                rows = ", ".join(map(str, empty[:8])) + ("…" if len(empty) > 8 else "")
+                notes.append(f"• {len(empty)} fila(s) sin email (filas {rows})")
+            if invalid:
+                ex = "; ".join(f"fila {n}: {v}" for n, v in invalid[:4]) + ("…" if len(invalid) > 4 else "")
+                notes.append(f"• {len(invalid)} fila(s) con email no válido ({ex})")
             n = self._excel_row_count()
-            qty = f"hasta {n} correos" if n is not None else "los correos"
-            if not messagebox.askyesno(
-                    "Confirmar envío",
-                    f"Se van a ENVIAR {qty} directamente desde Outlook.\n\n"
-                    "Esta acción no se puede deshacer. ¿Continuar?",
-                    icon="warning", default="no"):
-                return
+            skipped = len(empty) + len(invalid)
+            if s_mode == "send":
+                qty = f"{max(n - skipped, 0)} correos" if n is not None else "los correos"
+                msg = f"Se van a ENVIAR {qty} directamente desde Outlook.\n\n"
+                if notes:
+                    msg += "No se enviará nada a estas filas (el documento sí se genera):\n" \
+                           + "\n".join(notes) + "\n\n"
+                msg += "Esta acción no se puede deshacer. ¿Continuar?"
+                if not messagebox.askyesno("Confirmar envío", msg, icon="warning", default="no"):
+                    return
+            elif notes:
+                if not messagebox.askyesno(
+                        "Revisa los destinatarios",
+                        "No se creará borrador para estas filas (el documento sí se genera):\n"
+                        + "\n".join(notes) + "\n\n¿Continuar?", icon="warning"):
+                    return
 
         self._save_config()
         # Leer todos los valores de la interfaz aquí (hilo principal):
@@ -1278,17 +1453,22 @@ class App(ctk.CTk):
         self.progress_bar.set(0)
         self.lbl_progress.configure(text="")
         self._reset_counts()
+        self._run_log = []
+        self._report_ready("")
         self.log("=== INICIANDO PROCESO ===")
         self.is_running = True
         self._set_stop_enabled(True)
         self.btn_next.configure(state="disabled")
         self.btn_prev.configure(state="disabled")
-        threading.Thread(target=self.process_data, daemon=True).start()
+        self._worker = threading.Thread(target=self.process_data, daemon=True)
+        self._worker.start()
 
     def process_data(self):
         word_app = None
         com_initialized = False
         cfg = self._run
+        records = []                      # una entrada por fila, para el informe
+        run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
             # COM debe inicializarse en este hilo siempre (Word y/o Outlook)
             try:
@@ -1382,6 +1562,10 @@ class App(ctk.CTk):
                 try:
                     word_app = win32.Dispatch("Word.Application")
                     word_app.Visible = False
+                    try:
+                        word_app.DisplayAlerts = 0   # sin diálogos que bloqueen el proceso oculto
+                    except Exception:
+                        pass
                 except Exception as e:
                     self.log(f"ERROR iniciando Word: {e}")
                     return
@@ -1397,10 +1581,11 @@ class App(ctk.CTk):
                     break
 
                 row_status = "ok"
+                rec = {"Fila": row_num, "Estado": "", "Archivo": "", "Destinatario": "", "Detalle": ""}
+                held = []
                 try:
                     context = {col: format_cell(row[col]) for col in df.columns}
 
-                    held = []  # motivos por los que este correo no debe enviarse directamente
                     render_ctx = dict(context)
                     render_ctx.update({alias: context[col] for col, alias in aliases.items()})
                     doc = ColumnTemplate(self.word_template_path, aliases)
@@ -1459,13 +1644,24 @@ class App(ctk.CTk):
                             row_status = "warn"
                             held.append("no se pudo firmar")
 
+                    rec["Archivo"] = os.path.basename(final_path)
                     if s_mode == "none":
+                        rec["Estado"] = "Generado"
                         self.log(f"Fila {row_num}: OK — {os.path.basename(final_path)}")
                         continue
 
                     dest_email = context.get(email_col, "").strip()
+                    rec["Destinatario"] = dest_email
                     if not dest_email:
+                        rec["Estado"] = "Sin email"
                         self.log(f"Fila {row_num}: sin email — archivo: {os.path.basename(final_path)}")
+                        row_status = "warn"
+                        continue
+                    bad = invalid_emails(dest_email)
+                    if bad:
+                        rec["Estado"] = "Email no válido"
+                        self.log(f"Fila {row_num}: email no válido «{bad[0]}» — no se crea correo; "
+                                 f"archivo: {os.path.basename(final_path)}", level="warn")
                         row_status = "warn"
                         continue
 
@@ -1490,6 +1686,7 @@ class App(ctk.CTk):
                     bcc_val  = substitute_variables(cfg["bcc"], context)
 
                     mail.To  = "; ".join(filter(None, [dest_email, to_extra]))
+                    rec["Destinatario"] = mail.To
                     if cc_val:  mail.CC  = cc_val
                     if bcc_val: mail.BCC = bcc_val
                     if send_account:
@@ -1507,6 +1704,7 @@ class App(ctk.CTk):
                     if s_mode == "send" and held:
                         # Nunca enviar un correo incompleto: se deja en Borradores para revisarlo
                         mail.Save()
+                        rec["Estado"] = "No enviado (borrador)"
                         self.log(f"Fila {row_num}: NO ENVIADO ({'; '.join(held)}) — "
                                  f"guardado como borrador para {mail.To}", level="warn")
                         continue
@@ -1514,9 +1712,11 @@ class App(ctk.CTk):
                     if s_mode == "send":
                         mail.Send()
                         action = "Enviado a"
+                        rec["Estado"] = "Enviado"
                     else:
                         mail.Save()
                         action = "Borrador para"
+                        rec["Estado"] = "Borrador"
 
                     extras = "".join([
                         f" | CC: {cc_val}"  if cc_val  else "",
@@ -1527,7 +1727,11 @@ class App(ctk.CTk):
                 except Exception as e:
                     self.log(f"Error fila {row_num}: {e}")
                     row_status = "err"
+                    rec["Estado"] = "Error"
+                    held.append(str(e))
                 finally:
+                    rec["Detalle"] = "; ".join(held)
+                    records.append(rec)
                     self._counts[row_status] += 1
                     self.after(0, self._update_counts)
                     p = row_num / rows_total
@@ -1536,12 +1740,33 @@ class App(ctk.CTk):
                         self.lbl_progress.configure(text=f"{n} / {t}")
                     ))
 
-            if self.is_running:
+            # Filas que no llegaron a procesarse (proceso detenido)
+            for n in range(len(records) + 1, rows_total + 1):
+                records.append({"Fila": n, "Estado": "No procesado", "Archivo": "",
+                                "Destinatario": "", "Detalle": "proceso detenido"})
+
+            completed = self.is_running
+            if completed:
                 self.log("=== PROCESO COMPLETADO ===")
-                self.after(0, lambda: messagebox.showinfo("Completado", "El proceso ha finalizado."))
+            report = self._write_report(records, run_stamp)
+            records = []                  # ya guardado
+            if report:
+                self.log(f"Informe guardado: {os.path.join(REPORT_DIR, os.path.basename(report))}")
+            self.after(0, self._report_ready, report)
+            if not getattr(self, "_closing", False):
+                c = dict(self._counts)
+                title = "Completado" if completed else "Proceso detenido"
+                msg = (f"{'El proceso ha finalizado' if completed else 'El proceso se detuvo'}.\n\n"
+                       f"✓ {c['ok']} correctos   ⚠ {c['warn']} con avisos   ✗ {c['err']} errores")
+                if report:
+                    msg += "\n\nHay un informe detallado en la carpeta de salida (botón «Ver informe»)."
+                show = messagebox.showinfo if (completed and not c["err"]) else messagebox.showwarning
+                self.after(0, lambda: show(title, msg))
 
         except Exception as e:
             self.log(f"Error general: {e}")
+            if records:                   # guardar lo procesado hasta el fallo
+                self.after(0, self._report_ready, self._write_report(records, run_stamp))
         finally:
             self.is_running = False
             self.after(0, lambda: self._set_stop_enabled(False))
