@@ -97,7 +97,7 @@ def app(tmp_path, monkeypatch, dialogs):
     import tkinter
     import docusend
     monkeypatch.setattr(docusend, "CONFIG_PATH", str(tmp_path / "config.json"))
-    monkeypatch.setattr(docusend, "check_for_updates", lambda _app: None)
+    monkeypatch.setattr(docusend, "check_for_updates", lambda _app, manual=False: None)
     monkeypatch.setattr(docusend.App, "_load_outlook_accounts", lambda self: None)
     opened = []
     monkeypatch.setattr(docusend.App, "_open_path", lambda self, p: opened.append(p))

@@ -301,7 +301,7 @@ class App(ctk.CTk):
         ctk.CTkButton(foot, text="Buscar actualizaciones", width=160, height=24,
                       font=F["small"], fg_color="transparent", border_width=1,
                       text_color=C["muted"], border_color=C["border"],
-                      command=lambda: check_for_updates(self)).grid(row=0, column=2, sticky="e")
+                      command=lambda: check_for_updates(self, manual=True)).grid(row=0, column=2, sticky="e")
 
         self._ready = False          # no guardar config hasta terminar de restaurarla
         self._saved_account = ""

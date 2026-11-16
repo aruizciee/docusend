@@ -54,6 +54,7 @@ jobs:
             --collect-all customtkinter `
             --runtime-tmpdir "%TEMP%" `
             --icon assets/icon.ico `
+            --add-data "assets;assets" `
             docusend.py
 
       - name: Crear Release y subir .exe
