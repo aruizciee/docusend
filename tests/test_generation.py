@@ -219,3 +219,30 @@ def test_config_survives_open_and_close(project, monkeypatch):
         second.destroy()
     with open(docusend.CONFIG_PATH, encoding="utf-8") as fh:
         assert json.load(fh) == saved
+
+
+def test_saved_excel_is_restored_after_window_shows(project):
+    """El Excel guardado se lee tras mostrar la ventana, no durante el arranque."""
+    project.combo_sheet.set("Datos")
+    project._save_config()
+
+    second = docusend.App()
+    try:
+        # Recién creada: todavía no ha leído el Excel, pero ya sabe qué hoja usar
+        assert second.excel_columns == []
+        assert second._sheet() == "Datos"
+        second.after(0, second._warm_up)
+        deadline = time.time() + 30
+
+        def poll():
+            if second._excel_restore_pending and time.time() < deadline:
+                second.after(20, poll)
+            else:
+                second.after(50, second.quit)
+        second.after(10, poll)
+        second.mainloop()
+        assert second.excel_columns == ["Nombre", "Empresa", "Fecha", "CP", "Email"]
+        assert second.combo_sheet.get() == "Datos"
+        assert second.combo_fields_email.get() == "Email"
+    finally:
+        second.destroy()

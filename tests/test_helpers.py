@@ -133,3 +133,32 @@ class TestUpdaterVersion:
 
     def test_garbage_does_not_crash(self):
         assert _parse_version("no-es-una-version") == (0,)
+
+
+class TestStartup:
+    def test_heavy_libraries_are_not_imported_at_startup(self):
+        """Importar la app no debe cargar pandas, docxtpl, pyhanko ni requests:
+        retrasarían la aparición de la ventana."""
+        import os
+        import subprocess
+        import sys
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        code = (
+            "import sys, types, ctypes\n"
+            "for n in ('win32com', 'win32com.client', 'pythoncom'):\n"
+            "    sys.modules.setdefault(n, types.ModuleType(n))\n"
+            "if not hasattr(ctypes, 'windll'):\n"
+            "    ctypes.windll = types.SimpleNamespace(shell32=types.SimpleNamespace(\n"
+            "        SetCurrentProcessExplicitAppUserModelID=lambda i: None))\n"
+            "import docusend\n"
+            "heavy = [m for m in ('pandas', 'numpy', 'docxtpl', 'pyhanko', 'requests') if m in sys.modules]\n"
+            "print(','.join(heavy))\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], cwd=root,
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == ""
+
+    def test_lazy_modules_work_when_used(self):
+        assert docusend.pd.isna(float("nan"))
+        assert docusend._column_template_class().__name__ == "ColumnTemplate"

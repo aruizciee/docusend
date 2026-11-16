@@ -11,8 +11,17 @@ import os
 import sys
 import subprocess
 import threading
-import requests
 from tkinter import messagebox
+
+
+class _LazyRequests:
+    """requests se importa en el primer uso para no retrasar el arranque."""
+    def __getattr__(self, name):
+        import requests
+        return getattr(requests, name)
+
+
+requests = _LazyRequests()
 
 try:
     from version import VERSION
@@ -161,8 +170,8 @@ def _build_updater_script(pid, new_exe, original_exe):
         ":wait_process\n"
         f'tasklist /fi "PID eq {pid}" 2>nul | find /i "{pid}" >nul\n'
         "if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait_process)\n"
-        "timeout /t 2 /nobreak >nul\n"
-        "set MAX_RETRIES=15\n"
+        # Sin pausa fija: si el archivo sigue bloqueado, lo resuelven los reintentos
+        "set MAX_RETRIES=30\n"
         "set RETRY_COUNT=0\n"
         ":retry_update\n"
         # move /y sustituye el archivo sin borrarlo antes: si falla, la version
@@ -171,7 +180,7 @@ def _build_updater_script(pid, new_exe, original_exe):
         f'if exist "{new_exe}" (\n'
         "    set /a RETRY_COUNT+=1\n"
         "    if !RETRY_COUNT! geq !MAX_RETRIES! goto on_error\n"
-        "    timeout /t 2 /nobreak >nul\n"
+        "    timeout /t 1 /nobreak >nul\n"
         "    goto retry_update\n"
         ")\n"
         f'start "" "{original_exe}"\n'

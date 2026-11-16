@@ -1,8 +1,5 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-import pandas as pd
-from docxtpl import DocxTemplate
-import win32com.client as win32
 import os
 import re
 import json
@@ -25,13 +22,54 @@ try:
 except Exception:
     pass
 
-try:
-    from pyhanko.sign import signers
-    from pyhanko.pdf_utils.reader import PdfFileReader
-    from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-    PYHANKO_AVAILABLE = True
-except ImportError:
-    PYHANKO_AVAILABLE = False
+# ── Carga diferida de librerías pesadas ───────────────────────────────────────
+# pandas, docxtpl, pyhanko y win32com tardan en importarse (varios segundos en
+# un arranque en frío). No hacen falta para dibujar la ventana, así que se
+# importan la primera vez que se usan; la app las precarga en segundo plano
+# nada más mostrarse (ver App._warm_up).
+# Los "import" van escritos dentro de funciones, y no con importlib, para que
+# PyInstaller los detecte y los incluya en el ejecutable.
+class _LazyModule:
+    """Se comporta como el módulo, pero lo importa en el primer uso."""
+    def __init__(self, loader):
+        self._loader = loader
+        self._module = None
+
+    def _load(self):
+        if self._module is None:
+            self._module = self._loader()
+        return self._module
+
+    def __getattr__(self, name):
+        return getattr(self._load(), name)
+
+
+def _load_pandas():
+    import pandas
+    return pandas
+
+
+def _load_win32():
+    import win32com.client
+    return win32com.client
+
+
+pd    = _LazyModule(_load_pandas)
+win32 = _LazyModule(_load_win32)
+
+_pyhanko_cache = None
+
+def _pyhanko():
+    """(signers, IncrementalPdfFileWriter) de pyhanko, o None si no está disponible."""
+    global _pyhanko_cache
+    if _pyhanko_cache is None:
+        try:
+            from pyhanko.sign import signers
+            from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+            _pyhanko_cache = (signers, IncrementalPdfFileWriter)
+        except ImportError:
+            _pyhanko_cache = False
+    return _pyhanko_cache or None
 
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".docusend_config.json")
 
@@ -102,20 +140,35 @@ def column_aliases(columns):
             aliases[name] = f"campo_{i}_"
     return aliases
 
-class ColumnTemplate(DocxTemplate):
-    """DocxTemplate que acepta {{Nombre completo}} y otros nombres de columna
-    que no son identificadores válidos, traduciéndolos a un alias interno."""
-    def __init__(self, template_file, aliases=None):
-        super().__init__(template_file)
-        self._col_aliases = dict(aliases or {})
+_column_template_cls = None
 
-    def patch_xml(self, src_xml):
-        xml = super().patch_xml(src_xml)
-        for name, alias in self._col_aliases.items():
-            for variant in {name, html.escape(name, quote=False), html.escape(name)}:
-                xml = re.sub(r'\{\{\s*' + re.escape(variant) + r'\s*\}\}',
-                             lambda m, a=alias: '{{ ' + a + ' }}', xml)
-        return xml
+def _column_template_class():
+    """Crea (una sola vez) la clase de plantilla; docxtpl se importa aquí."""
+    global _column_template_cls
+    if _column_template_cls is None:
+        from docxtpl import DocxTemplate
+
+        class ColumnTemplate(DocxTemplate):
+            """DocxTemplate que acepta {{Nombre completo}} y otros nombres de columna
+            que no son identificadores válidos, traduciéndolos a un alias interno."""
+            def __init__(self, template_file, aliases=None):
+                super().__init__(template_file)
+                self._col_aliases = dict(aliases or {})
+
+            def patch_xml(self, src_xml):
+                xml = super().patch_xml(src_xml)
+                for name, alias in self._col_aliases.items():
+                    for variant in {name, html.escape(name, quote=False), html.escape(name)}:
+                        xml = re.sub(r'\{\{\s*' + re.escape(variant) + r'\s*\}\}',
+                                     lambda m, a=alias: '{{ ' + a + ' }}', xml)
+                return xml
+
+        _column_template_cls = ColumnTemplate
+    return _column_template_cls
+
+def ColumnTemplate(template_file, aliases=None):
+    """Plantilla Word que admite nombres de columna con espacios, guiones, etc."""
+    return _column_template_class()(template_file, aliases)
 
 def format_cell(value):
     """Convierte un valor de Excel en texto legible para plantillas y correos."""
@@ -308,6 +361,7 @@ class App(ctk.CTk):
         self._restore_config()
         self._ready = True
         self._show_step(0)
+        self.after(150, self._warm_up)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(1500, self._load_outlook_accounts)
 
@@ -505,6 +559,8 @@ class App(ctk.CTk):
         xo.grid(row=22, column=0, columnspan=3, padx=20, pady=(2, 0), sticky="w")
         ctk.CTkLabel(xo, text="Hoja:", font=F["small"], text_color=C["muted"]).pack(side="left", padx=(0, 6))
         self._sheet_names = []
+        self._pending_sheet = ""
+        self._excel_restore_pending = False
         self.combo_sheet = ctk.CTkComboBox(xo, values=["(primera hoja)"], state="readonly", width=170,
                                            height=26, font=F["small"], command=self._on_sheet_change)
         self.combo_sheet.set("(primera hoja)")
@@ -532,11 +588,51 @@ class App(ctk.CTk):
         ctk.CTkButton(btn_frame, text="Añadir", width=55, command=self.add_extra_attachments).pack(side="left", padx=2)
         ctk.CTkButton(btn_frame, text="Borrar", width=55, fg_color=C["neutral"], hover_color=C["neutral_hover"], command=self.clear_extra_attachments).pack(side="left")
 
+    # ── Precarga tras mostrar la ventana ─────────────────────────────────────
+    def _warm_up(self):
+        """Importa en segundo plano las librerías pesadas y, cuando están,
+        termina de restaurar el Excel guardado (hojas y columnas)."""
+        self._warm_done = False
+
+        def work():
+            try:
+                pd.__name__                 # pandas
+                _column_template_class()    # docxtpl
+                _pyhanko()                  # firma
+            except Exception:
+                pass
+            self._warm_done = True          # el hilo no toca la interfaz
+
+        threading.Thread(target=work, daemon=True).start()
+        self._poll_warm_up()
+
+    def _poll_warm_up(self):
+        if not self._warm_done:
+            self.after(100, self._poll_warm_up)
+            return
+        self._restore_excel()
+
+    def _restore_excel(self):
+        if not self._excel_restore_pending:
+            return
+        self._excel_restore_pending = False
+        if not os.path.isfile(self.excel_data_path):
+            return
+        self._load_sheets(self._pending_sheet)
+        self._update_columns()
+        field = getattr(self, "_pending_email_field", "")
+        if field in self.excel_columns:
+            self.combo_fields_email.set(field)
+
     # ── Hoja y rango de filas ────────────────────────────────────────────────
     def _sheet(self):
         """Hoja elegida (nombre), o 0 = primera hoja."""
         v = self.combo_sheet.get()
-        return v if v in self._sheet_names else 0
+        if v in self._sheet_names:
+            return v
+        # Aún no se han leído las hojas (se hace tras mostrar la ventana):
+        # usar la hoja guardada en la configuración.
+        return self._pending_sheet or 0
 
     def _load_sheets(self, preferred=""):
         try:
@@ -545,6 +641,8 @@ class App(ctk.CTk):
         except Exception:
             names = []
         self._sheet_names = names
+        self._pending_sheet = ""
+        self._excel_restore_pending = False
         self.combo_sheet.configure(values=names or ["(primera hoja)"])
         self.combo_sheet.set(preferred if preferred in names
                              else names[0] if names else "(primera hoja)")
@@ -1199,11 +1297,11 @@ class App(ctk.CTk):
         for entry, key in [(self.entry_row_from, "row_from"), (self.entry_row_to, "row_to")]:
             if cfg.get(key):
                 entry.insert(0, str(cfg[key]))
-        if self.excel_data_path and os.path.isfile(self.excel_data_path):
-            self._load_sheets(cfg.get("excel_sheet", ""))
-            self._update_columns()
-            if cfg.get("email_col"):
-                self.combo_fields_email.set(cfg["email_col"])
+        # El Excel se lee después de mostrar la ventana (ver _warm_up) para no
+        # retrasar el arranque con la carga de pandas.
+        self._pending_sheet = cfg.get("excel_sheet", "")
+        self._pending_email_field = cfg.get("email_col", "")
+        self._excel_restore_pending = bool(self.excel_data_path)
         if cfg.get("email_col"):
             self.entry_email_col.set(cfg["email_col"])
         for entry, key in [(self.entry_to_extra, "to_extra"),
@@ -1468,6 +1566,10 @@ class App(ctk.CTk):
 
     def _load_signer(self, password):
         """Carga el certificado PFX. Devuelve el firmante o None si no se puede abrir."""
+        hanko = _pyhanko()
+        if hanko is None:
+            return None
+        signers = hanko[0]
         encodings = ("utf-8", "latin1") if password else (None,)
         for enc in encodings:
             try:
@@ -1490,7 +1592,7 @@ class App(ctk.CTk):
                 "La firma digital solo se aplica a PDF, y el formato elegido es Word.\n\n"
                 "¿Continuar sin firmar?", icon="warning", default="no")
         if self.sign_mode.get() == "pfx":
-            if not PYHANKO_AVAILABLE:
+            if _pyhanko() is None:
                 messagebox.showerror("Firma", "La librería de firma (pyhanko) no está disponible.")
                 return False
             if not self.pfx_path or not os.path.isfile(self.pfx_path):
@@ -1521,6 +1623,7 @@ class App(ctk.CTk):
                     self.log("ERROR: no se pudo abrir el certificado PFX.")
                     return False
 
+                signers, IncrementalPdfFileWriter = _pyhanko()
                 with open(input_pdf, 'rb') as doc_b, open(output_pdf, 'wb') as out_f:
                     pdf_w = IncrementalPdfFileWriter(doc_b, strict=False)
                     signers.sign_pdf(
@@ -2028,6 +2131,19 @@ class App(ctk.CTk):
                 except Exception:
                     pass
 
+def _close_splash():
+    """Cierra la pantalla de carga del ejecutable (no existe al ejecutar desde código)."""
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
-    app = App()
+    try:
+        app = App()
+        app.update_idletasks()
+    finally:
+        _close_splash()
     app.mainloop()

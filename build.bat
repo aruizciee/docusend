@@ -5,7 +5,7 @@ if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 
 echo Construyendo el ejecutable...
-pyinstaller --noconfirm --onefile --windowed --icon="assets\icon.ico" --add-data "assets;assets/" --collect-all customtkinter "docusend.py"
+pyinstaller --noconfirm --onefile --windowed --icon="assets\icon.ico" --splash "assets\splash.png" --add-data "assets;assets/" --collect-all customtkinter "docusend.py"
 if errorlevel 1 (
     echo.
     echo ERROR: la compilacion ha fallado.
