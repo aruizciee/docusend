@@ -29,7 +29,10 @@ Thumbs.db
 *.zip
 
 # Archivos locales / pruebas
-test*.py
-test*.txt
 *.docx
 *_out.txt
+.pytest_cache/
+
+# Carpetas que crea la app en la carpeta de salida
+_DocuSend_informes/
+_DocuSend_prueba/

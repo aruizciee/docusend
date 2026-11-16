@@ -1,9 +1,14 @@
 name: Build y Release
 
+# Solo se publica una release cuando se pide expresamente:
+#   - manualmente desde la pestaña Actions ("Run workflow"), o
+#   - al subir una etiqueta con el formato vAAAA.MM.DD-N (p. ej. v2026.11.16-1).
+# Un push normal a main ya NO publica nada.
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -27,9 +32,19 @@ jobs:
       - name: Generar tag de version
         id: version
         run: |
-          $date = Get-Date -Format "yyyy.MM.dd"
-          $run  = "${{ github.run_number }}"
-          $tag  = "v$date-$run"
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } else {
+            $date = Get-Date -Format "yyyy.MM.dd"
+            $run  = "${{ github.run_number }}"
+            $tag  = "v$date-$run"
+          }
+          # El actualizador compara versiones con este formato; otro formato
+          # haria que los usuarios no recibieran el aviso de actualizacion.
+          if ($tag -notmatch '^v\d{4}\.\d{2}\.\d{2}-\d+$') {
+            Write-Error "La etiqueta '$tag' no tiene el formato vAAAA.MM.DD-N"
+            exit 1
+          }
           echo "TAG=$tag" >> $env:GITHUB_OUTPUT
           [System.IO.File]::WriteAllText("version.py", "VERSION = `"$tag`"`n", [System.Text.UTF8Encoding]::new($false))
 
@@ -46,11 +61,9 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
           name: "Release ${{ steps.version.outputs.TAG }}"
+          generate_release_notes: true
           body: |
-            Release automatica generada al hacer push a `main`.
-
             **Commit:** ${{ github.sha }}
-            **Mensaje:** ${{ github.event.head_commit.message }}
           files: dist/docusend.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
