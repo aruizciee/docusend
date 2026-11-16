@@ -77,6 +77,15 @@ def invalid_emails(text):
 
 AUTOFIRMA_EXE = r'C:\Program Files\Autofirma\Autofirma\AutofirmaCommandLine.exe'
 REPORT_DIR = "_DocuSend_informes"
+TEST_DIR   = "_DocuSend_prueba"
+AF_ASK     = "Elegir en cada documento"
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+def autofirma_command():
+    """Ruta de AutofirmaCommandLine, o "" si no está instalado."""
+    if os.path.isfile(AUTOFIRMA_EXE):
+        return AUTOFIRMA_EXE
+    return shutil.which("AutofirmaCommandLine") or ""
 
 _JINJA_RESERVED = {
     "true", "false", "none", "and", "or", "not", "if", "else", "elif", "for", "in",
@@ -419,6 +428,14 @@ class App(ctk.CTk):
             if not self.output_folder:
                 messagebox.showwarning("Faltan datos", "Selecciona la carpeta de salida.")
                 return False
+            try:
+                self._row_range()
+            except ValueError:
+                messagebox.showwarning(
+                    "Rango de filas",
+                    "El rango de filas no es válido.\n\nEscribe números a partir de 1 "
+                    "(«de» no puede ser mayor que «a») o deja los campos vacíos.")
+                return False
             for label, path, check in [
                 ("la plantilla Word", self.word_template_path, os.path.isfile),
                 ("el archivo Excel",  self.excel_data_path,    os.path.isfile),
@@ -474,29 +491,100 @@ class App(ctk.CTk):
         ]
         for i, (label, attr, cmd, icon) in enumerate(rows, start=1):
             ctk.CTkLabel(f, text=f"{icon}  {label}",
-                         font=F["body"]).grid(row=i*2-1, column=0, columnspan=3,
+                         font=F["body"]).grid(row=i*10, column=0, columnspan=3,
                                                     padx=16, pady=(10, 2), sticky="w")
             lbl = ctk.CTkLabel(f, text="Sin seleccionar", text_color=C["muted"],
                                font=F["small"], anchor="w")
-            lbl.grid(row=i*2, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="ew")
+            lbl.grid(row=i*10+1, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="ew")
             setattr(self, attr, lbl)
             ctk.CTkButton(f, text="Seleccionar", width=110, command=cmd).grid(
-                row=i*2, column=2, padx=(0, 16), pady=(0, 4))
+                row=i*10+1, column=2, padx=(0, 16), pady=(0, 4))
+
+        # Opciones del Excel: hoja y rango de filas
+        xo = ctk.CTkFrame(f, fg_color="transparent")
+        xo.grid(row=22, column=0, columnspan=3, padx=20, pady=(2, 0), sticky="w")
+        ctk.CTkLabel(xo, text="Hoja:", font=F["small"], text_color=C["muted"]).pack(side="left", padx=(0, 6))
+        self._sheet_names = []
+        self.combo_sheet = ctk.CTkComboBox(xo, values=["(primera hoja)"], state="readonly", width=170,
+                                           height=26, font=F["small"], command=self._on_sheet_change)
+        self.combo_sheet.set("(primera hoja)")
+        self.combo_sheet.pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(xo, text="Filas: de", font=F["small"], text_color=C["muted"]).pack(side="left", padx=(0, 6))
+        self.entry_row_from = ctk.CTkEntry(xo, width=54, height=26, font=F["small"], placeholder_text="1")
+        self.entry_row_from.pack(side="left")
+        ctk.CTkLabel(xo, text="a", font=F["small"], text_color=C["muted"]).pack(side="left", padx=6)
+        self.entry_row_to = ctk.CTkEntry(xo, width=54, height=26, font=F["small"], placeholder_text="última")
+        self.entry_row_to.pack(side="left")
+        ctk.CTkLabel(xo, text="(vacío = todas)", font=F["small"], text_color=C["muted"]).pack(side="left", padx=8)
 
         ctk.CTkFrame(f, height=1, fg_color=C["border"]).grid(
-            row=7, column=0, columnspan=3, sticky="ew", padx=16, pady=(12, 8))
+            row=70, column=0, columnspan=3, sticky="ew", padx=16, pady=(12, 8))
             
         ctk.CTkLabel(f, text="📎 Adjuntos estáticos adicionales", font=F["body"]).grid(
-            row=8, column=0, columnspan=3, padx=16, pady=(0, 2), sticky="w")
+            row=80, column=0, columnspan=3, padx=16, pady=(0, 2), sticky="w")
             
         self.lbl_extra_att = ctk.CTkLabel(f, text="Ningún archivo seleccionado", text_color=C["muted"],
                                           font=F["small"], anchor="w", justify="left")
-        self.lbl_extra_att.grid(row=9, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="w")
+        self.lbl_extra_att.grid(row=90, column=0, columnspan=2, padx=20, pady=(0, 4), sticky="w")
         
         btn_frame = ctk.CTkFrame(f, fg_color="transparent")
-        btn_frame.grid(row=9, column=2, padx=(0, 16), pady=(0, 4), sticky="e")
+        btn_frame.grid(row=90, column=2, padx=(0, 16), pady=(0, 4), sticky="e")
         ctk.CTkButton(btn_frame, text="Añadir", width=55, command=self.add_extra_attachments).pack(side="left", padx=2)
         ctk.CTkButton(btn_frame, text="Borrar", width=55, fg_color=C["neutral"], hover_color=C["neutral_hover"], command=self.clear_extra_attachments).pack(side="left")
+
+    # ── Hoja y rango de filas ────────────────────────────────────────────────
+    def _sheet(self):
+        """Hoja elegida (nombre), o 0 = primera hoja."""
+        v = self.combo_sheet.get()
+        return v if v in self._sheet_names else 0
+
+    def _load_sheets(self, preferred=""):
+        try:
+            with pd.ExcelFile(self.excel_data_path) as xf:
+                names = [str(n) for n in xf.sheet_names]
+        except Exception:
+            names = []
+        self._sheet_names = names
+        self.combo_sheet.configure(values=names or ["(primera hoja)"])
+        self.combo_sheet.set(preferred if preferred in names
+                             else names[0] if names else "(primera hoja)")
+
+    def _on_sheet_change(self, _value=None):
+        self._row_count_key = None
+        self._update_columns()
+        self._save_config()
+
+    def _row_range(self):
+        """(desde, hasta) en nº de fila de datos (1 = primera), None = sin límite.
+        Lanza ValueError si lo escrito no es válido."""
+        def parse(entry):
+            t = entry.get().strip()
+            if not t:
+                return None
+            n = int(t)
+            if n < 1:
+                raise ValueError(t)
+            return n
+        a, b = parse(self.entry_row_from), parse(self.entry_row_to)
+        if a and b and a > b:
+            raise ValueError("rango")
+        return a, b
+
+    @staticmethod
+    def _rows_in_range(total, rng):
+        a, b = rng
+        return list(range(a or 1, min(b or total, total) + 1))
+
+    def _selected_rows(self):
+        """Números de fila que se van a procesar según el rango (o None)."""
+        total = self._excel_row_count()
+        if total is None:
+            return None
+        try:
+            rng = self._row_range()
+        except ValueError:
+            rng = (None, None)
+        return self._rows_in_range(total, rng)
 
     def _change_appearance_mode(self, new_mode: str):
         if new_mode == "Sistema":
@@ -604,6 +692,19 @@ class App(ctk.CTk):
         self.entry_pfx_pass = ctk.CTkEntry(self.pfx_frame, placeholder_text="Contraseña PFX", show="*", width=140)
         self.entry_pfx_pass.grid(row=1, column=1, sticky="w")
         self.pfx_path = ""
+
+        self.af_frame = ctk.CTkFrame(self.sign_options_frame, fg_color="transparent")
+        ctk.CTkLabel(self.af_frame, text="Certificado:").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.combo_af_cert = ctk.CTkComboBox(self.af_frame, values=[AF_ASK], state="readonly", width=260)
+        self.combo_af_cert.set(AF_ASK)
+        self.combo_af_cert.grid(row=0, column=1, sticky="w", padx=(0, 8))
+        self.btn_af_load = ctk.CTkButton(self.af_frame, text="Cargar certificados", width=140,
+                                         command=self._load_af_aliases)
+        self.btn_af_load.grid(row=0, column=2, sticky="w")
+        self.lbl_af_hint = ctk.CTkLabel(
+            self.af_frame, font=F["small"], text_color=C["muted"], justify="left", anchor="w",
+            text="Carga los certificados y elige uno para no tener que seleccionarlo en cada documento.")
+        self.lbl_af_hint.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PASO 3 — Correo
@@ -731,6 +832,11 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(f, text="Revisa y genera",
                      font=F["title"]).grid(row=0, column=0, pady=(14, 8), padx=16, sticky="w")
+        self.btn_test = ctk.CTkButton(
+            f, text="Probar con la primera fila", width=170, height=26, font=F["small"],
+            fg_color="transparent", border_width=1, border_color=C["primary"],
+            text_color=C["primary"], hover_color=C["border"], command=self.start_test)
+        self.btn_test.grid(row=0, column=0, pady=(14, 8), padx=16, sticky="e")
 
         # Resumen de lo que va a ocurrir
         self.summary_card = ctk.CTkFrame(f, fg_color=C["card"], border_width=1,
@@ -802,12 +908,12 @@ class App(ctk.CTk):
     def _excel_row_count(self):
         path = self.excel_data_path
         try:
-            key = (path, os.path.getmtime(path))
+            key = (path, os.path.getmtime(path), self._sheet())
         except OSError:
             return None
         if getattr(self, "_row_count_key", None) != key:
             try:
-                df = pd.read_excel(path, dtype=object)
+                df = pd.read_excel(path, sheet_name=self._sheet(), dtype=object)
                 df.columns = [str(c) for c in df.columns]
                 self._excel_df, self._row_count = df, len(df)
             except Exception:
@@ -823,7 +929,10 @@ class App(ctk.CTk):
         if df is None or col not in df.columns:
             return [], []
         empty, invalid = [], []
+        selected = set(self._selected_rows() or [])
         for n, value in enumerate(df[col].tolist(), start=1):
+            if n not in selected:
+                continue
             text = format_cell(value)
             if not text:
                 empty.append(n)
@@ -835,14 +944,26 @@ class App(ctk.CTk):
 
     def _refresh_summary(self):
         n = self._excel_row_count()
-        rows_txt = f"{n} fila{'s' if n != 1 else ''}" if n is not None else "filas desconocidas"
+        sel = self._selected_rows()
+        if n is None:
+            rows_txt = "filas desconocidas"
+        elif len(sel) == n:
+            rows_txt = f"{n} fila{'s' if n != 1 else ''}"
+        elif not sel:
+            rows_txt = f"⚠ ninguna fila en el rango (el Excel tiene {n})"
+        else:
+            rows_txt = f"filas {sel[0]}–{sel[-1]}  ({len(sel)} de {n})"
+        sheet_txt = f"  ·  hoja «{self._sheet()}»" if len(self._sheet_names) > 1 else ""
         self.summary_rows["Datos"].configure(
-            text=f"{os.path.basename(self.excel_data_path) or '—'}  ·  {rows_txt}")
+            text=f"{os.path.basename(self.excel_data_path) or '—'}{sheet_txt}  ·  {rows_txt}",
+            text_color=C["warning"] if (n is not None and not sel) else C["text"])
 
         fmt = "PDF" if self.output_format.get() == "pdf" else "Word (.docx)"
         doc_txt = f"{os.path.basename(self.word_template_path) or '—'}  →  {fmt}"
         if self.enable_signature.get() and self.output_format.get() == "pdf":
             doc_txt += "  ·  firmado con " + ("PFX" if self.sign_mode.get() == "pfx" else "AutoFirma")
+            if self.sign_mode.get() == "autofirma":
+                doc_txt += f" ({self._af_alias() or 'certificado a elegir en cada documento'})"
         self.summary_rows["Documento"].configure(text=doc_txt)
         self.summary_rows["Salida"].configure(text=self.output_folder or "—")
 
@@ -999,7 +1120,8 @@ class App(ctk.CTk):
     # ═══════════════════════════════════════════════════════════════════════════
     def _update_columns(self):
         try:
-            cols = list(pd.read_excel(self.excel_data_path, nrows=0).columns.astype(str))
+            cols = list(pd.read_excel(self.excel_data_path, sheet_name=self._sheet(),
+                                      nrows=0).columns.astype(str))
         except Exception:
             return
         self.excel_columns = cols
@@ -1074,7 +1196,11 @@ class App(ctk.CTk):
             else:
                 shown = path if key == "output_folder" else os.path.basename(path)
                 lbl.configure(text=f"{shown}  (no encontrado)", text_color=C["warning"])
+        for entry, key in [(self.entry_row_from, "row_from"), (self.entry_row_to, "row_to")]:
+            if cfg.get(key):
+                entry.insert(0, str(cfg[key]))
         if self.excel_data_path and os.path.isfile(self.excel_data_path):
+            self._load_sheets(cfg.get("excel_sheet", ""))
             self._update_columns()
             if cfg.get("email_col"):
                 self.combo_fields_email.set(cfg["email_col"])
@@ -1123,6 +1249,9 @@ class App(ctk.CTk):
             else:
                 self.lbl_pfx_path.configure(
                     text=f"{os.path.basename(self.pfx_path)}  (no encontrado)", text_color=C["warning"])
+        if cfg.get("af_alias"):
+            self.combo_af_cert.configure(values=[AF_ASK, cfg["af_alias"]])
+            self.combo_af_cert.set(cfg["af_alias"])
         if cfg.get("enable_signature"):
             self.enable_signature.set(True)
         self.toggle_signature_ui()
@@ -1138,9 +1267,13 @@ class App(ctk.CTk):
         else:
             self._saved_account = account
         save_config({
+            "excel_sheet":           self._sheet() or "",
+            "row_from":              self.entry_row_from.get().strip(),
+            "row_to":                self.entry_row_to.get().strip(),
             "enable_signature":      bool(self.enable_signature.get()),
             "sign_mode":             self.sign_mode.get(),
             "pfx_path":              self.pfx_path,
+            "af_alias":              self._af_alias(),
             "outlook_account":       account,
             "word_template_path":    self.word_template_path,
             "excel_data_path":       self.excel_data_path,
@@ -1247,6 +1380,7 @@ class App(ctk.CTk):
         if f:
             self.excel_data_path = f
             self.lbl_excel.configure(text=os.path.basename(f), text_color=C["text"])
+            self._load_sheets()
             self._update_columns()
             self._save_config()
 
@@ -1279,9 +1413,58 @@ class App(ctk.CTk):
 
     def toggle_sign_mode_ui(self):
         if self.sign_mode.get() == "pfx":
+            self.af_frame.pack_forget()
             self.pfx_frame.pack(fill="x", pady=4)
         else:
             self.pfx_frame.pack_forget()
+            self.af_frame.pack(fill="x", pady=4)
+
+    def _af_alias(self):
+        """Alias del certificado de AutoFirma elegido, o "" para elegir en cada documento."""
+        v = self.combo_af_cert.get()
+        return "" if v == AF_ASK else v
+
+    def _load_af_aliases(self):
+        af_cmd = autofirma_command()
+        if not af_cmd:
+            messagebox.showerror("AutoFirma", "No se encuentra AutoFirma en este equipo.")
+            return
+        self.btn_af_load.configure(state="disabled", text="Cargando…")
+
+        def fetch():
+            aliases, error = [], ""
+            try:
+                result = subprocess.run([af_cmd, "listaliases"], capture_output=True, text=True,
+                                        timeout=90, creationflags=_NO_WINDOW)
+                noise = ("ADVERTENCIA", "WARNING", "INFORMACI", "INFO:", "WindowsPreferences", "prefs root")
+                aliases = [l.strip() for l in (result.stdout or "").splitlines()
+                           if l.strip() and not any(x in l for x in noise)]
+                if result.returncode != 0 and not aliases:
+                    error = "AutoFirma no devolvió ningún certificado."
+            except Exception as e:
+                error = str(e)
+            self.after(0, self._set_af_aliases, aliases, error)
+        threading.Thread(target=fetch, daemon=True).start()
+
+    def _set_af_aliases(self, aliases, error=""):
+        self.btn_af_load.configure(state="normal", text="Cargar certificados")
+        current = self._af_alias()
+        self.combo_af_cert.configure(values=[AF_ASK] + aliases)
+        if current and current in aliases:
+            self.combo_af_cert.set(current)
+        elif len(aliases) == 1:
+            self.combo_af_cert.set(aliases[0])
+        else:
+            self.combo_af_cert.set(AF_ASK)
+        if error or not aliases:
+            self.lbl_af_hint.configure(
+                text="No se pudieron cargar los certificados; se pedirá en cada documento."
+                     + (f" ({error})" if error else ""), text_color=C["warning"])
+        else:
+            self.lbl_af_hint.configure(
+                text=f"{len(aliases)} certificado(s) disponibles. Con uno elegido no se preguntará "
+                     "en cada documento.", text_color=C["muted"])
+        self._save_config()
 
     def _load_signer(self, password):
         """Carga el certificado PFX. Devuelve el firmante o None si no se puede abrir."""
@@ -1322,7 +1505,7 @@ class App(ctk.CTk):
                 self._show_step(1)
                 return False
         else:
-            if not os.path.isfile(AUTOFIRMA_EXE) and not shutil.which("AutofirmaCommandLine"):
+            if not autofirma_command():
                 messagebox.showerror(
                     "Firma", "No se encuentra AutoFirma en este equipo.\n\n"
                     "Instálalo o elige firmar con certificado PFX.")
@@ -1351,21 +1534,29 @@ class App(ctk.CTk):
                 return False
         elif mode == "autofirma":
             try:
-                # Buscar AutofirmaCommandLine.exe en Program Files
-                af_cmd = AUTOFIRMA_EXE
-                if not os.path.isfile(af_cmd):
-                    # Fallback: intentar desde PATH
-                    af_cmd = 'AutofirmaCommandLine'
-                cmd = [
+                af_cmd = autofirma_command() or 'AutofirmaCommandLine'
+                base_cmd = [
                     af_cmd, "sign",
                     "-i", os.path.abspath(input_pdf),
                     "-o", os.path.abspath(output_pdf),
                     "-format", "pades",
-                    "-certgui"
                 ]
+                result = None
+                alias = self._run.get("af_alias", "")
+                if alias:
+                    result = subprocess.run(base_cmd + ["-alias", alias], capture_output=True,
+                                            text=True, timeout=120, creationflags=_NO_WINDOW)
+                    if result.returncode == 0 and os.path.isfile(output_pdf):
+                        return True
+                    # El certificado elegido no funcionó: volver a la ventana de AutoFirma
+                    self.log("Aviso: no se pudo firmar con el certificado elegido; "
+                             "se pedirá en la ventana de AutoFirma.")
+                    self._run["af_alias"] = ""
+                    try: os.remove(output_pdf)
+                    except OSError: pass
                 self.log("Abriendo AutoFirma (selecciona tu certificado en la ventana que aparece)...")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120,
-                                       creationflags=subprocess.CREATE_NO_WINDOW)
+                result = subprocess.run(base_cmd + ["-certgui"], capture_output=True, text=True,
+                                        timeout=120, creationflags=_NO_WINDOW)
                 if result.returncode == 0 and os.path.isfile(output_pdf):
                     return True
                 else:
@@ -1390,7 +1581,11 @@ class App(ctk.CTk):
     # ═══════════════════════════════════════════════════════════════════════════
     # Generación
     # ═══════════════════════════════════════════════════════════════════════════
-    def start_generation(self):
+    def start_test(self):
+        """Genera solo la primera fila y abre el resultado, sin enviar nada."""
+        self.start_generation(test=True)
+
+    def start_generation(self, test=False):
         for step in range(3):
             if not self._validate_step(step):
                 self._show_step(step)
@@ -1401,8 +1596,13 @@ class App(ctk.CTk):
         if not self._preflight_signing():
             return
 
+        sel = self._selected_rows()
+        if sel is not None and not sel:
+            messagebox.showwarning("Sin filas", "No hay ninguna fila del Excel dentro del rango indicado.")
+            return
+
         s_mode = self.send_mode.get()
-        if s_mode != "none":
+        if s_mode != "none" and not test:
             empty, invalid = self._email_issues()
             notes = []
             if empty:
@@ -1411,7 +1611,8 @@ class App(ctk.CTk):
             if invalid:
                 ex = "; ".join(f"fila {n}: {v}" for n, v in invalid[:4]) + ("…" if len(invalid) > 4 else "")
                 notes.append(f"• {len(invalid)} fila(s) con email no válido ({ex})")
-            n = self._excel_row_count()
+            sel = self._selected_rows()
+            n = len(sel) if sel is not None else None
             skipped = len(empty) + len(invalid)
             if s_mode == "send":
                 qty = f"{max(n - skipped, 0)} correos" if n is not None else "los correos"
@@ -1448,6 +1649,10 @@ class App(ctk.CTk):
             "sign_mode":        self.sign_mode.get(),
             "pfx_pass":         self.entry_pfx_pass.get(),
             "extra_attachments": list(getattr(self, "extra_attachments", [])),
+            "sheet":            self._sheet(),
+            "rows":             self._row_range(),
+            "test":             bool(test),
+            "af_alias":         self._af_alias(),
         }
         self._show_step(3)
         self.progress_bar.set(0)
@@ -1455,9 +1660,11 @@ class App(ctk.CTk):
         self._reset_counts()
         self._run_log = []
         self._report_ready("")
-        self.log("=== INICIANDO PROCESO ===")
+        self.log("=== PRUEBA CON LA PRIMERA FILA (no se envía nada) ===" if test
+                 else "=== INICIANDO PROCESO ===")
         self.is_running = True
         self._set_stop_enabled(True)
+        self.btn_test.configure(state="disabled")
         self.btn_next.configure(state="disabled")
         self.btn_prev.configure(state="disabled")
         self._worker = threading.Thread(target=self.process_data, daemon=True)
@@ -1484,8 +1691,14 @@ class App(ctk.CTk):
 
             self.log("Leyendo Excel...")
             # dtype=object evita que pandas convierta enteros en float (123.0)
-            df = pd.read_excel(self.excel_data_path, dtype=object)
+            df = pd.read_excel(self.excel_data_path, sheet_name=cfg["sheet"], dtype=object)
             df.columns = [str(c) for c in df.columns]
+            test = cfg["test"]
+            out_folder = self.output_folder
+            if test:
+                out_folder = os.path.join(self.output_folder, TEST_DIR)
+                os.makedirs(out_folder, exist_ok=True)
+            test_file = ""
 
             if s_mode != "none" and email_col not in df.columns:
                 self.log(f"ERROR: Columna '{email_col}' no encontrada.")
@@ -1570,12 +1783,23 @@ class App(ctk.CTk):
                     self.log(f"ERROR iniciando Word: {e}")
                     return
 
-            rows_total = len(df)
-            self.log(f"Registros a procesar: {rows_total}")
+            row_numbers = self._rows_in_range(len(df), cfg["rows"])
+            if test:
+                row_numbers = row_numbers[:1]
+            rows_total = len(row_numbers)
+            if not rows_total:
+                self.log("ERROR: no hay filas del Excel dentro del rango indicado.")
+                return
+            if rows_total == len(df):
+                self.log(f"Registros a procesar: {rows_total}")
+            else:
+                self.log(f"Registros a procesar: {rows_total} "
+                         f"(filas {row_numbers[0]}–{row_numbers[-1]} de {len(df)})")
             self.after(0, lambda: self.lbl_progress.configure(text=f"0 / {rows_total}"))
 
             used_names = set()
-            for row_num, (_, row) in enumerate(df.iterrows(), start=1):
+            for pos, row_num in enumerate(row_numbers, start=1):
+                row = df.iloc[row_num - 1]
                 if not getattr(self, "is_running", True):
                     self.log("=== PROCESO DETENIDO POR EL USUARIO ===")
                     break
@@ -1606,7 +1830,7 @@ class App(ctk.CTk):
                         base = f"{safe_name}_{n}"
                         n += 1
                     base_path = unique_base_path(
-                        self.output_folder, base, [".docx", ".pdf", "_Firmado.pdf"])
+                        out_folder, base, [".docx", ".pdf", "_Firmado.pdf"])
                     safe_name = os.path.basename(base_path)
                     used_names.add(safe_name.lower())
 
@@ -1645,6 +1869,7 @@ class App(ctk.CTk):
                             held.append("no se pudo firmar")
 
                     rec["Archivo"] = os.path.basename(final_path)
+                    test_file = final_path
                     if s_mode == "none":
                         rec["Estado"] = "Generado"
                         self.log(f"Fila {row_num}: OK — {os.path.basename(final_path)}")
@@ -1701,6 +1926,15 @@ class App(ctk.CTk):
                             row_status = "warn"
                             held.append(f"falta el adjunto {os.path.basename(att)}")
 
+                    if test:
+                        # Prueba: se muestra el correo en Outlook, sin guardar ni enviar
+                        mail.Display()
+                        test_file = ""
+                        note = f" (avisos: {'; '.join(held)})" if held else ""
+                        self.log(f"Fila {row_num}: PRUEBA — correo abierto en Outlook para "
+                                 f"{mail.To}, sin enviar{note}", level="warn" if held else "ok")
+                        continue
+
                     if s_mode == "send" and held:
                         # Nunca enviar un correo incompleto: se deja en Borradores para revisarlo
                         mail.Save()
@@ -1734,16 +1968,26 @@ class App(ctk.CTk):
                     records.append(rec)
                     self._counts[row_status] += 1
                     self.after(0, self._update_counts)
-                    p = row_num / rows_total
-                    self.after(0, lambda p=p, n=row_num, t=rows_total: (
+                    p = pos / rows_total
+                    self.after(0, lambda p=p, n=pos, t=rows_total: (
                         self.progress_bar.set(p),
                         self.lbl_progress.configure(text=f"{n} / {t}")
                     ))
 
             # Filas que no llegaron a procesarse (proceso detenido)
-            for n in range(len(records) + 1, rows_total + 1):
-                records.append({"Fila": n, "Estado": "No procesado", "Archivo": "",
-                                "Destinatario": "", "Detalle": "proceso detenido"})
+            done = {r["Fila"] for r in records}
+            for n in row_numbers:
+                if n not in done:
+                    records.append({"Fila": n, "Estado": "No procesado", "Archivo": "",
+                                    "Destinatario": "", "Detalle": "proceso detenido"})
+
+            if test:
+                records = []              # las pruebas no generan informe
+                self.log("=== PRUEBA TERMINADA ===")
+                if test_file and not getattr(self, "_closing", False):
+                    self.log(f"Abriendo {os.path.join(TEST_DIR, os.path.basename(test_file))}")
+                    self.after(0, self._open_path, test_file)
+                return
 
             completed = self.is_running
             if completed:
@@ -1771,6 +2015,7 @@ class App(ctk.CTk):
             self.is_running = False
             self.after(0, lambda: self._set_stop_enabled(False))
             self.after(0, lambda: self.btn_next.configure(state="normal"))
+            self.after(0, lambda: self.btn_test.configure(state="normal"))
             self.after(0, lambda: self.btn_prev.configure(state="normal"))
             try:
                 if word_app is not None:
